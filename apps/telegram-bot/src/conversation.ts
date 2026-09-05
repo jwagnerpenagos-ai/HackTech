@@ -3,6 +3,7 @@ import { INTENCIONES_RESTRINGIDAS } from "./auth.js";
 import { esSensible } from "./sensitive.js";
 import { interpretar, type IntencionNlu, type ResultadoNlu } from "./nluClient.js";
 import { sanearMensaje } from "./sanitize.js";
+import { noAutorizado } from "./commands.js";
 
 /** Estado conversacional que se guarda por chat mientras faltan datos. */
 export interface EstadoConversacion {
@@ -10,10 +11,23 @@ export interface EstadoConversacion {
   entidades: Record<string, string | number>;
   faltantes: string[];
   esperandoConfirmacion: boolean;
+  /**
+   * Tras un `crear_sesion` exitoso hecho por el propio paciente (fase 3), se
+   * le pregunta si quiere sincronizar con su Google Calendar personal —
+   * opcional, nunca bloquea la reserva ya confirmada. Sí/no se resuelve con
+   * `resolverOfertaCalendar`, igual patrón que `esperandoConfirmacion`.
+   */
+  ofertaCalendarPendiente: { reservaId: number; pacienteId: number } | null;
 }
 
 export function estadoInicial(): EstadoConversacion {
-  return { intencion: null, entidades: {}, faltantes: [], esperandoConfirmacion: false };
+  return {
+    intencion: null,
+    entidades: {},
+    faltantes: [],
+    esperandoConfirmacion: false,
+    ofertaCalendarPendiente: null,
+  };
 }
 
 function entidadesTexto(e: Record<string, unknown>): Record<string, string | number> {
@@ -48,6 +62,8 @@ const ETIQUETA_DATO = new Map<string, string>([
   ["texto", "el contenido"],
   ["carpeta", "el nombre de la carpeta"],
   ["consulta", "qué quieres buscar"],
+  ["telefono", "tu número de teléfono"],
+  ["email", "tu correo"],
 ]);
 
 function resumen(intencion: string, entidades: Record<string, string | number>): string {
@@ -61,6 +77,7 @@ function armarDesdeIntencion(intn: IntencionNlu): EstadoConversacion {
     entidades: entidadesTexto(intn.entidades),
     faltantes: [...intn.faltantes],
     esperandoConfirmacion: false,
+    ofertaCalendarPendiente: null,
   };
 }
 
@@ -97,13 +114,18 @@ function siguientePaso(estado: EstadoConversacion): Procesado {
 
 /**
  * Núcleo del manejo de texto libre, sin dependencias de grammY para poder
- * probarlo aislado. `nlu` se inyecta en las pruebas.
+ * probarlo aislado. `nlu` se inyecta en las pruebas. `autorizado` decide si
+ * ESTE chat puede ejecutar una intención administrativa
+ * (`INTENCIONES_RESTRINGIDAS`); por defecto `true` para no romper llamadas
+ * existentes (pruebas, y cualquier canal sin ese concepto) — `bot.ts` sí lo
+ * pasa siempre explícito, calculado con `esAutorizado(cfg, chatId)`.
  */
 export async function procesarTexto(
   cfg: Config,
   estadoPrevio: EstadoConversacion,
   entrada: string,
   nlu: (cfg: Config, mensaje: string) => Promise<ResultadoNlu> = interpretar,
+  autorizado = true,
 ): Promise<Procesado> {
   const { texto } = sanearMensaje(entrada);
   if (texto.length === 0) {
@@ -145,10 +167,28 @@ export async function procesarTexto(
     };
   }
 
-  if (!INTENCIONES_RESTRINGIDAS.has(intn.intencion)) {
+  // Saludo, "¿quién sos?", preguntas generales del consultorio: se responde
+  // directo con lo que armó el NLU (grounded en services/nlu/conocimiento/),
+  // sin pasar por la allowlist admin ni el umbral de confianza — nunca
+  // llega a n8n/core-api, es puro texto informativo.
+  if (intn.intencion === "charla_general") {
+    const respuesta = intn.respuesta?.trim();
     return {
       estado: estadoInicial(),
-      accion: { tipo: "responder", texto: "Esa acción no está disponible por este canal." },
+      accion: {
+        tipo: "responder",
+        texto:
+          respuesta !== undefined && respuesta.length > 0
+            ? respuesta
+            : "¡Hola! ¿En qué te puedo ayudar? Escribí /help para ver ejemplos.",
+      },
+    };
+  }
+
+  if (INTENCIONES_RESTRINGIDAS.has(intn.intencion) && !autorizado) {
+    return {
+      estado: estadoInicial(),
+      accion: { tipo: "responder", texto: noAutorizado() },
     };
   }
 
@@ -163,6 +203,25 @@ export async function procesarTexto(
   }
 
   return siguientePaso(armarDesdeIntencion(intn));
+}
+
+/**
+ * `crear_sesion` puede volver de core-api con `registro_requerido`: el chat
+ * es primera cita y faltan datos de registro (nombre/teléfono). En vez de
+ * un mensaje final, esto reentra al mismo bucle de "pedir_dato" que ya
+ * maneja `procesarTexto`, para completar esos campos y reintentar.
+ */
+export function pedirDatosDeRegistro(
+  entidadesActuales: Record<string, string | number>,
+  camposFaltantes: string[],
+): Procesado {
+  return siguientePaso({
+    intencion: "crear_sesion",
+    entidades: entidadesActuales,
+    faltantes: camposFaltantes,
+    esperandoConfirmacion: false,
+    ofertaCalendarPendiente: null,
+  });
 }
 
 /** Resolución de la confirmación pendiente. */
@@ -191,4 +250,19 @@ export function resolverConfirmacion(
       texto: `Confirmado: ${resumen(estado.intencion, estado.entidades)}\n(pendiente conectar la API núcleo)`,
     },
   };
+}
+
+export type ResultadoOfertaCalendar =
+  | { estado: EstadoConversacion; tipo: "sin_pendiente" | "declinado" }
+  | { estado: EstadoConversacion; tipo: "aceptado"; reservaId: number; pacienteId: number };
+
+/** Resolución del sí/no de "¿agrego la cita a tu Google Calendar?" (fase 3, opcional). */
+export function resolverOfertaCalendar(
+  estado: EstadoConversacion,
+  respuesta: "si" | "no",
+): ResultadoOfertaCalendar {
+  const oferta = estado.ofertaCalendarPendiente;
+  if (!oferta) return { estado: estadoInicial(), tipo: "sin_pendiente" };
+  if (respuesta === "no") return { estado: estadoInicial(), tipo: "declinado" };
+  return { estado: estadoInicial(), tipo: "aceptado", reservaId: oferta.reservaId, pacienteId: oferta.pacienteId };
 }

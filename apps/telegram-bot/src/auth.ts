@@ -3,10 +3,13 @@ import type { Config } from "./config.js";
 /**
  * Frontera de identidad del bot.
  *
- * Un `chat_id` fuera de la allowlist es un desconocido: puede pedir el
- * catálogo público, pero no agendar, consultar agenda ni ver datos de nadie.
- * (Alineado con `personas.vinculo_telegram` en la base: chat sin paciente
- * vinculado = desconocido.)
+ * `TELEGRAM_ALLOWED_CHAT_IDS` es la allowlist ADMINISTRATIVA (Lina/staff):
+ * agenda completa, bloquear horario, buscar cualquier cliente, enviar
+ * correos/crear carpetas a mano. Cualquier otro chat puede consultar el
+ * catálogo, ver disponibilidad y agendar para sí mismo sin estar en esta
+ * lista — su identidad como paciente se resuelve del lado de `core-api` vía
+ * `personas.vinculo_telegram` (chat sin paciente vinculado = primera cita),
+ * no aquí. Este archivo solo decide qué chats tienen el nivel "admin".
  */
 
 export type NivelAcceso = "autorizado" | "desconocido";
@@ -20,11 +23,8 @@ export function esAutorizado(cfg: Config, chatId: number | undefined): boolean {
   return nivelDeAcceso(cfg, chatId) === "autorizado";
 }
 
-/** Intenciones que solo tiene sentido ejecutar para un chat autorizado. */
+/** Intenciones administrativas: solo un chat autorizado (Lina/staff) puede ejecutarlas. */
 export const INTENCIONES_RESTRINGIDAS = new Set<string>([
-  "consultar_agenda",
-  "consultar_disponibilidad",
-  "crear_sesion",
   "modificar_sesion",
   "cancelar_sesion",
   "buscar_cliente",

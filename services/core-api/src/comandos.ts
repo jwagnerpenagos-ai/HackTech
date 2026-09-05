@@ -18,9 +18,13 @@ import * as integraciones from "./dominio/integraciones.js";
  */
 
 const REQUISITOS: Record<IntencionEjecutable, readonly (keyof Entidades)[]> = {
+  consultar_catalogo: [],
   consultar_agenda: [],
   consultar_disponibilidad: ["servicio", "sede", "fecha"],
-  crear_sesion: ["cliente", "servicio", "sede", "fecha", "hora"],
+  // "cliente" no está aquí a propósito: para un chat de Telegram identificado
+  // se resuelve solo (ver el case); solo hace falta si el paciente es
+  // desconocido o el canal no tiene identidad de chat (ver más abajo).
+  crear_sesion: ["servicio", "sede", "fecha", "hora"],
   modificar_sesion: ["sesion_id", "fecha", "hora"],
   cancelar_sesion: ["sesion_id"],
   buscar_cliente: ["cliente"],
@@ -79,7 +83,12 @@ export async function ejecutarComando(
   db: Db,
   intencion: IntencionEjecutable,
   entidades: Entidades,
-  ctx: { creadoPor?: string | null } = {},
+  // `esAdmin` lo decide server.ts contra cfg.adminChatIds, nunca el propio
+  // llamador: así este módulo no depende de Config y sigue siendo trivial
+  // de probar. `creadoPor` es el chat_id de Telegram como string cuando el
+  // canal lo tiene; en otros canales (web, pruebas) puede no serlo — por
+  // eso siempre se valida con Number.isSafeInteger antes de usarlo como tal.
+  ctx: { creadoPor?: string | null; esAdmin?: boolean } = {},
 ): Promise<ResultadoComando> {
   const faltan = camposFaltantes(intencion, entidades);
   if (faltan.length > 0) {
@@ -92,15 +101,39 @@ export async function ejecutarComando(
 
   try {
     switch (intencion) {
+      case "consultar_catalogo": {
+        const servicios = await catalogo.listarServicios(db);
+        return { ok: true, datos: { servicios } };
+      }
+
       case "consultar_agenda": {
         const desdeIso = entidades.fecha ? `${entidades.fecha}T00:00:00-05:00` : new Date().toISOString();
         const hastaIso = entidades.fecha
           ? `${entidades.fecha}T23:59:59-05:00`
           : sieteDiasDespuesIso(desdeIso);
+
+        // Admin (Lina/staff): agenda completa, igual que siempre. Cualquier
+        // otro chat ve solo la suya, resuelta por personas.vinculo_telegram.
+        // Un canal sin chat_id numérico (web, pruebas) se trata como admin:
+        // no hay identidad de paciente que filtrar.
+        const chatId = Number(ctx.creadoPor);
+        if (ctx.esAdmin === true || !Number.isSafeInteger(chatId)) {
+          const citas = await agenda.consultarAgenda(db, {
+            desdeIso,
+            hastaIso,
+            sedeNombre: entidades.sede ?? null,
+          });
+          return { ok: true, datos: { citas } };
+        }
+        const identidad = await pacientes.resolverPorChatId(db, chatId);
+        if (identidad.tipo === "desconocido") {
+          return { ok: true, datos: { citas: [] } };
+        }
         const citas = await agenda.consultarAgenda(db, {
           desdeIso,
           hastaIso,
           sedeNombre: entidades.sede ?? null,
+          pacienteId: identidad.paciente.id,
         });
         return { ok: true, datos: { citas } };
       }
@@ -124,40 +157,97 @@ export async function ejecutarComando(
       }
 
       case "crear_sesion": {
-        const nombreCliente = exigir(entidades.cliente, "cliente");
         const nombreServicio = exigir(entidades.servicio, "servicio");
         const nombreSede = exigir(entidades.sede, "sede");
         const fecha = exigir(entidades.fecha, "fecha");
         const hora = exigir(entidades.hora, "hora");
 
-        const resultadoPaciente = await pacientes.buscarPaciente(db, nombreCliente);
-        if (resultadoPaciente.tipo === "no_encontrado") {
-          return errorComando("no_encontrado", "No se encontró ningún paciente con ese nombre.", 404);
+        // Un chat de Telegram no-admin se identifica solo (o se registra si
+        // es su primera cita). Admin y canales sin chat_id numérico (web,
+        // pruebas) siguen el camino de siempre: nombre libre + búsqueda
+        // difusa, porque ahí "cliente" es a nombre de otra persona.
+        const chatId = Number(ctx.creadoPor);
+        const identificaPorChat = ctx.esAdmin !== true && Number.isSafeInteger(chatId);
+
+        let paciente: pacientes.Paciente;
+        if (identificaPorChat) {
+          const identidad = await pacientes.resolverPorChatId(db, chatId);
+          if (identidad.tipo === "conocido") {
+            paciente = identidad.paciente;
+          } else {
+            const faltanRegistro = (["cliente", "telefono"] as const).filter(
+              (campo) => entidades[campo] === undefined || entidades[campo] === null,
+            );
+            if (faltanRegistro.length > 0) {
+              return {
+                ok: false,
+                datos: { camposFaltantes: faltanRegistro },
+                error: {
+                  codigo: "registro_requerido",
+                  mensaje: "Es tu primera cita: necesito tu nombre completo y tu teléfono para registrarte.",
+                  status: 422,
+                },
+              };
+            }
+            paciente = await pacientes.crearPacienteConVinculo(db, {
+              nombreCompleto: exigir(entidades.cliente, "cliente"),
+              telefono: exigir(entidades.telefono, "telefono"),
+              email: entidades.email ?? null,
+              chatId,
+            });
+          }
+        } else {
+          const nombreCliente = exigir(entidades.cliente, "cliente");
+          const resultadoPaciente = await pacientes.buscarPaciente(db, nombreCliente);
+          if (resultadoPaciente.tipo === "no_encontrado") {
+            return errorComando("no_encontrado", "No se encontró ningún paciente con ese nombre.", 404);
+          }
+          if (resultadoPaciente.tipo === "ambiguo") {
+            return {
+              ok: false,
+              datos: { candidatos: resultadoPaciente.candidatos },
+              error: {
+                codigo: "cliente_ambiguo",
+                mensaje: "Hay más de un paciente con ese nombre; hace falta precisar cuál.",
+                status: 409,
+              },
+            };
+          }
+          paciente = resultadoPaciente.paciente;
         }
-        if (resultadoPaciente.tipo === "ambiguo") {
-          return {
-            ok: false,
-            datos: { candidatos: resultadoPaciente.candidatos },
-            error: {
-              codigo: "cliente_ambiguo",
-              mensaje: "Hay más de un paciente con ese nombre; hace falta precisar cuál.",
-              status: 409,
-            },
-          };
-        }
+
         const servicio = await catalogo.resolverServicio(db, nombreServicio);
         if (!servicio) return errorComando("no_encontrado", "No se encontró ese servicio.", 404);
         const sede = await catalogo.resolverSede(db, nombreSede);
         if (!sede) return errorComando("no_encontrado", "No se encontró esa sede.", 404);
 
         const creada = await agenda.crearSesion(db, {
-          pacienteId: resultadoPaciente.paciente.id,
+          pacienteId: paciente.id,
           servicioId: servicio.id,
           sedeId: sede.id,
           iniciaEnIso: aTimestamptzBogota(fecha, hora),
           creadoPor: ctx.creadoPor ?? null,
         });
-        return { ok: true, datos: creada };
+
+        // Confirmación por correo: obligatoria cuando el paciente tiene
+        // email en ficha. No es una regla de negocio nueva, es orquestación
+        // de algo que ya existe (integraciones.enviarCorreo → outbox).
+        if (paciente.email) {
+          await integraciones.enviarCorreo(db, {
+            destinatario: paciente.email,
+            asunto: "Confirmación de tu cita — La Fisioterapeuta Li",
+            texto: `Hola ${paciente.nombreCompleto}, tu cita de ${servicio.nombre} en ${sede.nombre} quedó agendada para el ${fecha} a las ${hora}.`,
+          });
+        }
+
+        // `pacienteId` solo va en la respuesta cuando quien reservó es el
+        // propio paciente por chat (no cuando Lina/admin reserva a nombre de
+        // otro): es lo que el bot usa para decidir si tiene sentido
+        // ofrecerle A ESE CHAT sincronizar con SU Calendar personal.
+        return {
+          ok: true,
+          datos: identificaPorChat ? { ...creada, pacienteId: paciente.id } : creada,
+        };
       }
 
       case "modificar_sesion": {

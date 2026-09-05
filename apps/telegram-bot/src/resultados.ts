@@ -25,6 +25,13 @@ interface Candidato {
   telefono?: string | null;
 }
 
+interface ServicioConTarifa {
+  nombre?: string;
+  duracionMinMinutos?: number;
+  precio?: number | null;
+  moneda?: string | null;
+}
+
 /** "2026-09-05T15:00:00-05:00" -> "05/09 15:00". Sin librería de fechas: el formato ya viene fijo en offset -05:00. */
 function fechaCorta(iso: string | undefined): string {
   if (typeof iso !== "string" || iso.length < 16) return iso ?? "";
@@ -43,9 +50,24 @@ function campoTexto(valor: unknown, defecto: string): string {
   return typeof valor === "string" || typeof valor === "number" ? String(valor) : defecto;
 }
 
+/** "80000" -> "$80.000 COP". Sin librería de moneda: el formato es siempre COP con separador de miles. */
+function precioTexto(precio: number | null | undefined, moneda: string | null | undefined): string {
+  if (precio === null || precio === undefined) return "precio a consultar";
+  return `$${precio.toLocaleString("es-CO")} ${moneda ?? "COP"}`;
+}
+
 function formatearExito(intencion: string, datos: unknown): string {
   const d = (datos ?? {}) as Record<string, unknown>;
   switch (intencion) {
+    case "consultar_catalogo": {
+      const servicios = d["servicios"] as ServicioConTarifa[] | undefined;
+      return listaOVacio(
+        servicios,
+        (s) => `${s.nombre ?? "?"} (${s.duracionMinMinutos ?? "?"} min) — ${precioTexto(s.precio, s.moneda)}`,
+        "No hay servicios para mostrar.",
+      );
+    }
+
     case "crear_sesion":
       return `Cita creada. Número de reserva: ${campoTexto(d["reservaId"], "?")}.`;
 

@@ -57,6 +57,13 @@ describe("contrato: intents.schema.json ↔ Zod", () => {
       confianza: 1,
       faltantes: [],
     },
+    {
+      intencion: "charla_general",
+      entidades: {},
+      confianza: 0.9,
+      faltantes: [],
+      respuesta: "¡Hola! Soy el asistente de La Fisioterapeuta Li.",
+    },
   ];
 
   it.each(ejemplosValidos)("acepta en ambos validadores: %o", (ej) => {
@@ -71,6 +78,7 @@ describe("contrato: intents.schema.json ↔ Zod", () => {
     { intencion: "crear_sesion", entidades: {}, confianza: 0.5, faltantes: ["color"] },
     { intencion: "crear_sesion", entidades: { fecha: "05/09/2026" }, confianza: 0.5, faltantes: [] },
     { entidades: {}, confianza: 0.5, faltantes: [] },
+    { intencion: "charla_general", entidades: {}, confianza: 0.9, faltantes: [], respuesta: "x".repeat(601) },
   ];
 
   it.each(ejemplosInvalidos)("rechaza en ambos validadores: %o", (ej) => {

@@ -61,8 +61,11 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
       return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
     }
 
+    const chatId = Number(cuerpo.data.creado_por);
+    const esAdmin = Number.isSafeInteger(chatId) && cfg.adminChatIds.has(chatId);
     const resultado = await ejecutarComando(db, cuerpo.data.intencion, cuerpo.data.entidades, {
       creadoPor: cuerpo.data.creado_por ?? null,
+      esAdmin,
     });
 
     req.log.info(

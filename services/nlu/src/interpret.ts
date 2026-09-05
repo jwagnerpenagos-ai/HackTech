@@ -10,6 +10,7 @@ import { ollamaChat, OllamaError } from "./ollama.js";
 type ChatFn = typeof ollamaChat;
 import { construirSystemPrompt, PREFIJO_USUARIO } from "./prompt.js";
 import { sanearMensaje } from "./sanitize.js";
+import { buscarContexto } from "./conocimiento.js";
 
 export type MotivoFallback =
   | "mensaje_vacio"
@@ -57,10 +58,15 @@ function extraerJson(texto: string): unknown {
   }
 }
 
+const NOMBRES_ENTIDAD_SET = new Set<string>(NOMBRES_ENTIDAD);
+
 /**
  * Limpieza tolerante del objeto crudo del modelo ANTES de validar:
- * descarta claves de entidad desconocidas y deduplica `faltantes`.
- * Lo que quede se valida con Zod de forma estricta; si no pasa, es fallback.
+ * descarta claves de entidad desconocidas y filtra/deduplica `faltantes`
+ * contra la misma lista blanca (un modelo de 3B a veces alucina un nombre
+ * que no existe, p.ej. "nombre" — se descarta en vez de tumbar toda la
+ * interpretación). Lo que quede se valida con Zod de forma estricta; si no
+ * pasa, es fallback.
  */
 function prelimpiar(crudo: unknown): unknown {
   if (typeof crudo !== "object" || crudo === null) return crudo;
@@ -80,13 +86,19 @@ function prelimpiar(crudo: unknown): unknown {
 
   const faltantesRaw = obj["faltantes"];
   const faltantesIn = Array.isArray(faltantesRaw) ? faltantesRaw : [];
-  const faltantes = [...new Set(faltantesIn.filter((x) => typeof x === "string"))];
+  const faltantes = [
+    ...new Set(faltantesIn.filter((x): x is string => typeof x === "string" && NOMBRES_ENTIDAD_SET.has(x))),
+  ];
+
+  const respuestaRaw = obj["respuesta"];
+  const respuesta = typeof respuestaRaw === "string" ? respuestaRaw.normalize("NFC").trim() : respuestaRaw;
 
   return {
     intencion: obj["intencion"],
     entidades,
     confianza: obj["confianza"],
     faltantes,
+    respuesta,
   };
 }
 
@@ -114,7 +126,8 @@ export async function interpretar(
   }
 
   const hoy = opts.hoy ?? hoyEnZona(cfg.TIMEZONE);
-  const system = construirSystemPrompt(hoy, cfg.TIMEZONE);
+  const contexto = buscarContexto(texto);
+  const system = construirSystemPrompt(hoy, cfg.TIMEZONE, contexto);
 
   let contenido: string;
   let modeloReal = cfg.OLLAMA_MODEL;

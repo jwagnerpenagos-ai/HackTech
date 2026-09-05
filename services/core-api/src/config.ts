@@ -20,6 +20,11 @@ const EnvSchema = z.object({
   // Secreto compartido entre servicios internos. Obligatorio en producción.
   INTERNAL_API_KEY: z.string().min(16).optional(),
 
+  // chat_id de Telegram con acceso administrativo (Lina/staff): agenda
+  // completa, bloquear horario, etc. Un chat fuera de esta lista solo puede
+  // ver/agendar lo suyo (identidad resuelta vía personas.vinculo_telegram).
+  CORE_API_ADMIN_CHAT_IDS: z.string().default(""),
+
   TIMEZONE: z.string().min(1).default("America/Bogota"),
 
   // Límites defensivos de la superficie HTTP.
@@ -30,7 +35,16 @@ const EnvSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
-});
+}).transform((env) => ({
+  ...env,
+  adminChatIds: new Set(
+    env.CORE_API_ADMIN_CHAT_IDS.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((s) => Number(s))
+      .filter((n) => Number.isSafeInteger(n)),
+  ),
+}));
 
 export type Config = Readonly<z.infer<typeof EnvSchema>> & {
   readonly isProd: boolean;

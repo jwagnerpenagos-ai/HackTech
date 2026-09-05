@@ -47,16 +47,17 @@ function filaACita(f: FilaCita): Cita {
 
 export async function consultarAgenda(
   db: Db,
-  opts: { desdeIso: string; hastaIso: string; sedeNombre?: string | null },
+  opts: { desdeIso: string; hastaIso: string; sedeNombre?: string | null; pacienteId?: number | null },
 ): Promise<Cita[]> {
   const r = await db.query<FilaCita>(
     `SELECT reserva_id, reserva_uuid, estado, inicia_en, termina_en, sede_nombre, servicio_nombre, paciente_nombre
        FROM agenda.v_cita
       WHERE inicia_en >= $1 AND inicia_en < $2
         AND ($3::text IS NULL OR sede_nombre ILIKE $3)
+        AND ($4::bigint IS NULL OR paciente_id = $4)
         AND estado NOT IN ('rechazada', 'expirada')
       ORDER BY inicia_en`,
-    [opts.desdeIso, opts.hastaIso, opts.sedeNombre ? `%${opts.sedeNombre}%` : null],
+    [opts.desdeIso, opts.hastaIso, opts.sedeNombre ? `%${opts.sedeNombre}%` : null, opts.pacienteId ?? null],
   );
   return r.rows.map(filaACita);
 }

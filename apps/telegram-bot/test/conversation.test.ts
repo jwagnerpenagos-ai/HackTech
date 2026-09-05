@@ -4,6 +4,7 @@ import {
   estadoInicial,
   procesarTexto,
   resolverConfirmacion,
+  resolverOfertaCalendar,
 } from "../src/conversation.js";
 import type { ResultadoNlu } from "../src/nluClient.js";
 
@@ -15,7 +16,12 @@ function nluFijo(r: ResultadoNlu): () => Promise<ResultadoNlu> {
 
 const ok = (
   intencion: string,
-  extra: Partial<{ entidades: Record<string, unknown>; confianza: number; faltantes: string[] }> = {},
+  extra: Partial<{
+    entidades: Record<string, unknown>;
+    confianza: number;
+    faltantes: string[];
+    respuesta: string | null;
+  }> = {},
 ): ResultadoNlu => ({
   ok: true,
   intencion: {
@@ -23,6 +29,7 @@ const ok = (
     entidades: extra.entidades ?? {},
     confianza: extra.confianza ?? 0.9,
     faltantes: (extra.faltantes ?? []) as never,
+    ...(extra.respuesta !== undefined ? { respuesta: extra.respuesta } : {}),
   },
 });
 
@@ -55,6 +62,7 @@ describe("procesarTexto", () => {
       entidades: { cliente: "Laura" },
       faltantes: ["servicio", "fecha"],
       esperandoConfirmacion: false,
+      ofertaCalendarPendiente: null,
     };
     const r = await procesarTexto(cfg, previo, "rehabilitación", nluFijo(ok("desconocida")));
     expect(r.estado.entidades["servicio"]).toBe("rehabilitación");
@@ -99,6 +107,36 @@ describe("procesarTexto", () => {
     const r = await procesarTexto(cfg, estadoInicial(), "hola bot", nluFijo(ok("desconocida")));
     expect(r.accion.tipo).toBe("responder");
   });
+
+  it("'charla_general' responde con lo que armó el NLU, sin pasar por n8n", async () => {
+    const r = await procesarTexto(
+      cfg,
+      estadoInicial(),
+      "hola",
+      nluFijo(ok("charla_general", { respuesta: "¡Hola! Soy el asistente de La Fisioterapeuta Li." })),
+    );
+    expect(r.accion.tipo).toBe("responder");
+    expect(r.accion.texto).toBe("¡Hola! Soy el asistente de La Fisioterapeuta Li.");
+    expect(r.estado).toEqual(estadoInicial());
+  });
+
+  it("'charla_general' sin 'respuesta' del modelo cae a un saludo genérico", async () => {
+    const r = await procesarTexto(cfg, estadoInicial(), "hola", nluFijo(ok("charla_general")));
+    expect(r.accion.tipo).toBe("responder");
+    expect(r.accion.texto).toContain("¿En qué te puedo ayudar?");
+  });
+
+  it("'charla_general' no requiere autorización ni pasa el umbral de confianza", async () => {
+    const r = await procesarTexto(
+      cfg,
+      estadoInicial(),
+      "hola",
+      nluFijo(ok("charla_general", { confianza: 0.1, respuesta: "¡Hola!" })),
+      false,
+    );
+    expect(r.accion.tipo).toBe("responder");
+    expect(r.accion.texto).toBe("¡Hola!");
+  });
 });
 
 describe("resolverConfirmacion", () => {
@@ -107,6 +145,7 @@ describe("resolverConfirmacion", () => {
     entidades: { sesion_id: 5 },
     faltantes: [],
     esperandoConfirmacion: true,
+    ofertaCalendarPendiente: null,
   };
 
   it("'si' -> ejecutar", () => {
@@ -124,5 +163,24 @@ describe("resolverConfirmacion", () => {
   it("sin confirmación pendiente -> mensaje neutro", () => {
     const r = resolverConfirmacion(estadoInicial(), "si");
     expect(r.accion.texto).toContain("nada pendiente");
+  });
+});
+
+describe("resolverOfertaCalendar", () => {
+  const conOferta = { ...estadoInicial(), ofertaCalendarPendiente: { reservaId: 77, pacienteId: 5 } };
+
+  it("'si' -> aceptado, con reservaId y pacienteId", () => {
+    const r = resolverOfertaCalendar(conOferta, "si");
+    expect(r).toMatchObject({ tipo: "aceptado", reservaId: 77, pacienteId: 5 });
+  });
+
+  it("'no' -> declinado", () => {
+    const r = resolverOfertaCalendar(conOferta, "no");
+    expect(r.tipo).toBe("declinado");
+  });
+
+  it("sin oferta pendiente -> sin_pendiente", () => {
+    const r = resolverOfertaCalendar(estadoInicial(), "si");
+    expect(r.tipo).toBe("sin_pendiente");
   });
 });

@@ -7,16 +7,22 @@ import type { NivelAcceso } from "./auth.js";
 
 export const AYUDA = [
   "Comandos:",
-  "/start — inicia y muestra tu estado de acceso",
+  "/start — inicia",
   "/help — esta ayuda",
-  "/id — muestra tu chat_id (para pedir acceso al administrador)",
+  "/id — muestra tu chat_id",
   "/ping — comprueba que el bot responde",
   "",
-  "Si tenés acceso, también podés escribir en lenguaje natural:",
-  '  «¿qué citas tengo mañana?»  ·  «agenda a Laura para el viernes 3pm»',
+  "También podés simplemente saludar o preguntar cosas generales del",
+  "consultorio (\"¿quién sos?\", políticas, qué esperar en la primera cita).",
   "",
-  "Las acciones sensibles (cancelar, reprogramar, enviar correo) piden",
-  "confirmación explícita antes de ejecutarse.",
+  "Escribime en lenguaje natural, por ejemplo:",
+  '  «hola» · «¿qué servicios tienen y a cómo?»  ·  «¿qué horarios hay para punción seca en Tunja el viernes?»',
+  '  «quiero agendar una cita»  ·  «¿qué citas tengo?»',
+  "",
+  "Si es tu primera cita te voy a pedir tu nombre y tu teléfono; las",
+  "próximas veces ya te reconozco. Las acciones administrativas (agenda",
+  "completa, bloquear horario, etc.) piden confirmación y son solo para",
+  "el staff del consultorio.",
 ].join("\n");
 
 export function inicio(nivel: NivelAcceso): string {
@@ -24,9 +30,9 @@ export function inicio(nivel: NivelAcceso): string {
     return "Listo. Tenés acceso de administrador. Escribí lo que necesitás o usá /help.";
   }
   return [
-    "Hola. Este bot es de uso interno de La Fisioterapeuta Li.",
-    "Tu chat no está autorizado, así que solo podés consultar información pública.",
-    "Si necesitás acceso, pasale tu /id al administrador.",
+    "¡Hola! Soy el asistente de La Fisioterapeuta Li.",
+    "Puedo contarte sobre nuestros servicios y precios, y ayudarte a agendar una cita.",
+    "Escribime lo que necesites, o usá /help para ver ejemplos.",
   ].join("\n");
 }
 

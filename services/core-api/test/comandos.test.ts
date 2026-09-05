@@ -11,6 +11,50 @@ describe("ejecutarComando", () => {
     expect(llamadas).toHaveLength(0);
   });
 
+  it("consultar_catalogo lista servicios sin requerir identidad", async () => {
+    const { db } = crearDbFalsa([
+      [{ nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45, valor_total: "80000.00", moneda: "COP", sesiones_incluidas: 1 }],
+    ]);
+    const r = await ejecutarComando(db, "consultar_catalogo", {});
+    expect(r.ok).toBe(true);
+    expect(r.datos).toMatchObject({ servicios: [{ nombre: "Punción Seca", precio: 80000 }] });
+  });
+
+  it("consultar_agenda de un chat no-admin desconocido devuelve vacío sin filtrar por sede/fecha", async () => {
+    const { db, llamadas } = crearDbFalsa([[]]);
+    const r = await ejecutarComando(db, "consultar_agenda", {}, { creadoPor: "555" });
+    expect(r).toEqual({ ok: true, datos: { citas: [] } });
+    expect(llamadas).toHaveLength(1); // solo resolverPorChatId, nunca llega a agenda.v_cita
+  });
+
+  it("consultar_agenda de un chat no-admin conocido filtra por su pacienteId", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [{ id: 5, nombre_completo: "Laura Gómez", telefono: null, email: null }],
+      [
+        {
+          reserva_id: 1,
+          reserva_uuid: "u1",
+          estado: "confirmada",
+          inicia_en: "2026-09-05T15:00:00-05:00",
+          termina_en: "2026-09-05T15:40:00-05:00",
+          sede_nombre: "Tunja",
+          servicio_nombre: "Punción Seca",
+          paciente_nombre: "Laura Gómez",
+        },
+      ],
+    ]);
+    const r = await ejecutarComando(db, "consultar_agenda", {}, { creadoPor: "111" });
+    expect(r.ok).toBe(true);
+    expect(llamadas[1]?.valores[3]).toBe(5);
+  });
+
+  it("consultar_agenda de un admin ve todo, aunque el chat_id sea numérico", async () => {
+    const { db, llamadas } = crearDbFalsa([[]]);
+    const r = await ejecutarComando(db, "consultar_agenda", {}, { creadoPor: "111", esAdmin: true });
+    expect(r.ok).toBe(true);
+    expect(llamadas).toHaveLength(1);
+  });
+
   it("consultar_agenda sin filtros consulta agenda.v_cita", async () => {
     const { db } = crearDbFalsa([
       [
@@ -73,6 +117,63 @@ describe("ejecutarComando", () => {
     );
     expect(r).toEqual({ ok: true, datos: { reservaId: 77 } });
     expect(llamadas).toHaveLength(4);
+  });
+
+  it("crear_sesion de un chat conocido no pide 'cliente' y reserva a nombre de ese paciente", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [{ id: 5, nombre_completo: "Laura Gómez", telefono: "3001234567", email: null }], // resolverPorChatId
+      [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
+      [{ id: 1, nombre: "Tunja" }],
+      [{ crear_reserva: 77 }],
+    ]);
+    const r = await ejecutarComando(
+      db,
+      "crear_sesion",
+      { servicio: "Punción", sede: "Tunja", fecha: "2026-09-05", hora: "15:00" },
+      { creadoPor: "111" },
+    );
+    expect(r).toEqual({ ok: true, datos: { reservaId: 77, pacienteId: 5 } });
+    expect(llamadas).toHaveLength(4);
+  });
+
+  it("crear_sesion de un chat desconocido sin nombre/teléfono pide registro_requerido", async () => {
+    const { db, llamadas } = crearDbFalsa([[]]); // resolverPorChatId: desconocido
+    const r = await ejecutarComando(
+      db,
+      "crear_sesion",
+      { servicio: "Punción", sede: "Tunja", fecha: "2026-09-05", hora: "15:00" },
+      { creadoPor: "555" },
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatchObject({ codigo: "registro_requerido", status: 422 });
+    expect((r.datos as { camposFaltantes: string[] }).camposFaltantes).toEqual(["cliente", "telefono"]);
+    expect(llamadas).toHaveLength(1); // no crea nada mientras falten datos
+  });
+
+  it("crear_sesion de un chat desconocido con nombre/teléfono se registra y reserva", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [], // resolverPorChatId: desconocido
+      [{ id: 9 }], // insert personas.paciente
+      [], // insert personas.vinculo_telegram
+      [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
+      [{ id: 1, nombre: "Tunja" }],
+      [{ crear_reserva: 78 }],
+    ]);
+    const r = await ejecutarComando(
+      db,
+      "crear_sesion",
+      {
+        cliente: "Ana Ríos",
+        telefono: "3009998877",
+        servicio: "Punción",
+        sede: "Tunja",
+        fecha: "2026-09-05",
+        hora: "15:00",
+      },
+      { creadoPor: "555" },
+    );
+    expect(r).toEqual({ ok: true, datos: { reservaId: 78, pacienteId: 9 } });
+    expect(llamadas).toHaveLength(6);
   });
 
   it("crear_sesion con cliente ambiguo devuelve 409 y los candidatos", async () => {

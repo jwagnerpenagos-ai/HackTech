@@ -4,6 +4,32 @@ import * as agenda from "../src/dominio/agenda.js";
 import { ErrorDominio } from "../src/errores.js";
 
 describe("dominio/agenda", () => {
+  it("consultarAgenda sin pacienteId filtra solo por rango y sede", async () => {
+    const { db, llamadas } = crearDbFalsa([[]]);
+    await agenda.consultarAgenda(db, { desdeIso: "2026-09-05T00:00:00-05:00", hastaIso: "2026-09-06T00:00:00-05:00" });
+    expect(llamadas[0]?.valores).toEqual([
+      "2026-09-05T00:00:00-05:00",
+      "2026-09-06T00:00:00-05:00",
+      null,
+      null,
+    ]);
+  });
+
+  it("consultarAgenda con pacienteId lo pasa como cuarto parámetro", async () => {
+    const { db, llamadas } = crearDbFalsa([[]]);
+    await agenda.consultarAgenda(db, {
+      desdeIso: "2026-09-05T00:00:00-05:00",
+      hastaIso: "2026-09-06T00:00:00-05:00",
+      pacienteId: 5,
+    });
+    expect(llamadas[0]?.valores).toEqual([
+      "2026-09-05T00:00:00-05:00",
+      "2026-09-06T00:00:00-05:00",
+      null,
+      5,
+    ]);
+  });
+
   it("consultarDisponibilidad llama a agenda.slots_disponibles con los parámetros dados", async () => {
     const { db, llamadas } = crearDbFalsa([
       [{ slot_inicio: "2026-09-05T15:00:00-05:00", slot_fin: "2026-09-05T15:40:00-05:00" }],

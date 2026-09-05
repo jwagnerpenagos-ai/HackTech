@@ -25,8 +25,10 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validarEntidadesConJsonSchema = ajv.compile(jsonSchema.properties.entidades);
 
 describe("contrato: intents.schema.json ↔ comando.ts (lado ejecución)", () => {
-  it("las intenciones ejecutables son exactamente las del JSON Schema menos 'desconocida'", () => {
-    const enJson = jsonSchema.properties.intencion.enum.filter((i) => i !== "desconocida").sort();
+  it("las intenciones ejecutables son exactamente las del JSON Schema menos 'desconocida' y 'charla_general'", () => {
+    const enJson = jsonSchema.properties.intencion.enum
+      .filter((i) => i !== "desconocida" && i !== "charla_general")
+      .sort();
     const enZod = [...INTENCIONES_EJECUTABLES].sort();
     expect(enZod).toEqual(enJson);
   });

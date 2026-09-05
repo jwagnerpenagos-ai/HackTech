@@ -10,6 +10,8 @@
     "intencion": {
       "type": "string",
       "enum": [
+        "charla_general",
+        "consultar_catalogo",
         "consultar_agenda",
         "consultar_disponibilidad",
         "crear_sesion",
@@ -22,7 +24,12 @@
         "bloquear_horario",
         "desconocida"
       ],
-      "description": "Una de las once intenciones cerradas. Cualquier otro valor es inválido."
+      "description": "Una de las trece intenciones cerradas. Cualquier otro valor es inválido."
+    },
+    "respuesta": {
+      "type": ["string", "null"],
+      "maxLength": 600,
+      "description": "Solo relevante cuando intencion='charla_general': respuesta conversacional breve, grounded en la base de conocimiento (services/nlu/conocimiento/). Para cualquier otra intención va null u omitido."
     },
     "entidades": {
       "type": "object",
@@ -47,7 +54,9 @@
         "asunto": { "type": ["string", "null"], "maxLength": 200 },
         "texto": { "type": ["string", "null"], "maxLength": 2000 },
         "carpeta": { "type": ["string", "null"], "maxLength": 200 },
-        "consulta": { "type": ["string", "null"], "maxLength": 500 }
+        "consulta": { "type": ["string", "null"], "maxLength": 500 },
+        "telefono": { "type": ["string", "null"], "maxLength": 30 },
+        "email": { "type": ["string", "null"], "maxLength": 254 }
       }
     },
     "confianza": {
@@ -72,11 +81,13 @@
           "asunto",
           "texto",
           "carpeta",
-          "consulta"
+          "consulta",
+          "telefono",
+          "email"
         ]
       },
       "uniqueItems": true,
-      "maxItems": 11
+      "maxItems": 13
     }
   }
 }

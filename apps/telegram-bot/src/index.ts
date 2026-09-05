@@ -8,7 +8,7 @@ function main(): void {
 
   if (cfg.allowedChatIds.size === 0) {
     logger.warn(
-      "TELEGRAM_ALLOWED_CHAT_IDS está vacío: ningún chat podrá usar acciones. Configúralo con tu /id.",
+      "TELEGRAM_ALLOWED_CHAT_IDS está vacío: nadie tiene acceso administrativo (agenda completa, bloquear horario, etc.). Configúralo con tu /id.",
     );
   }
 

@@ -11,6 +11,7 @@ import { z } from "zod";
  */
 
 export const INTENCIONES_EJECUTABLES = [
+  "consultar_catalogo",
   "consultar_agenda",
   "consultar_disponibilidad",
   "crear_sesion",
@@ -35,6 +36,8 @@ export const NOMBRES_ENTIDAD = [
   "texto",
   "carpeta",
   "consulta",
+  "telefono",
+  "email",
 ] as const;
 
 const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -53,6 +56,8 @@ export const EntidadesSchema = z
     texto: z.string().max(2000).nullable().optional(),
     carpeta: z.string().max(200).nullable().optional(),
     consulta: z.string().max(500).nullable().optional(),
+    telefono: z.string().max(30).nullable().optional(),
+    email: z.string().max(254).nullable().optional(),
   })
   .strict();
 

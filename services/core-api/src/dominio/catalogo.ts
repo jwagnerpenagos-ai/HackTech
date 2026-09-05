@@ -57,6 +57,54 @@ export async function resolverSede(db: Db, nombre: string): Promise<Sede | null>
   return r.rows[0] ?? null;
 }
 
+export interface ServicioConTarifa {
+  nombre: string;
+  duracionMinMinutos: number;
+  duracionMaxMinutos: number;
+  precio: number | null;
+  moneda: string | null;
+  sesionesIncluidas: number | null;
+}
+
+interface FilaServicioTarifa {
+  nombre: string;
+  duracion_min_minutos: number;
+  duracion_max_minutos: number;
+  valor_total: string | null;
+  moneda: string | null;
+  sesiones_incluidas: number | null;
+}
+
+/**
+ * Catálogo público (servicios, duración, precio de la tarifa vigente más
+ * chica). Usado por la intención `consultar_catalogo`, abierta a cualquiera:
+ * no expone nada que no esté ya pensado como información de cara al público.
+ */
+export async function listarServicios(db: Db): Promise<ServicioConTarifa[]> {
+  const r = await db.query<FilaServicioTarifa>(
+    `SELECT s.nombre, s.duracion_min_minutos, s.duracion_max_minutos,
+            t.valor_total, t.moneda, t.sesiones_incluidas
+       FROM catalogo.servicio s
+       LEFT JOIN LATERAL (
+         SELECT valor_total, moneda, sesiones_incluidas
+           FROM catalogo.tarifa
+          WHERE servicio_id = s.id AND activo AND vigencia @> CURRENT_DATE
+          ORDER BY sesiones_incluidas ASC
+          LIMIT 1
+       ) t ON true
+      WHERE s.activo
+      ORDER BY s.nombre`,
+  );
+  return r.rows.map((f) => ({
+    nombre: f.nombre,
+    duracionMinMinutos: f.duracion_min_minutos,
+    duracionMaxMinutos: f.duracion_max_minutos,
+    precio: f.valor_total !== null ? Number(f.valor_total) : null,
+    moneda: f.moneda,
+    sesionesIncluidas: f.sesiones_incluidas,
+  }));
+}
+
 /** El único profesional activo, cuando la intención no especifica cuál. */
 export async function profesionalPorDefecto(db: Db): Promise<number | null> {
   const r = await db.query<{ id: number }>(

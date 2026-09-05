@@ -9,6 +9,8 @@ import { z } from "zod";
  */
 
 export const INTENCIONES = [
+  "charla_general",
+  "consultar_catalogo",
   "consultar_agenda",
   "consultar_disponibilidad",
   "crear_sesion",
@@ -34,6 +36,8 @@ export const NOMBRES_ENTIDAD = [
   "texto",
   "carpeta",
   "consulta",
+  "telefono",
+  "email",
 ] as const;
 
 const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -52,6 +56,8 @@ export const EntidadesSchema = z
     texto: z.string().max(2000).nullable().optional(),
     carpeta: z.string().max(200).nullable().optional(),
     consulta: z.string().max(500).nullable().optional(),
+    telefono: z.string().max(30).nullable().optional(),
+    email: z.string().max(254).nullable().optional(),
   })
   .strict();
 
@@ -60,7 +66,10 @@ export const IntencionSchema = z
     intencion: z.enum(INTENCIONES),
     entidades: EntidadesSchema,
     confianza: z.number().min(0).max(1),
-    faltantes: z.array(z.enum(NOMBRES_ENTIDAD)).max(11),
+    faltantes: z.array(z.enum(NOMBRES_ENTIDAD)).max(13),
+    // Solo relevante para intencion="charla_general" (respuesta conversacional
+    // grounded en services/nlu/conocimiento/). Para el resto va null/omitido.
+    respuesta: z.string().max(600).nullable().optional(),
   })
   .strict()
   .superRefine((val, ctx) => {

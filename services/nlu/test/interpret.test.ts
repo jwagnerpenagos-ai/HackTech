@@ -58,6 +58,22 @@ describe("interpretar()", () => {
     expect(r.intencion.entidades).not.toHaveProperty("inyectado");
   });
 
+  it("descarta un nombre de 'faltantes' que el modelo alucinó (no está en la lista blanca)", async () => {
+    const chat = chatQueDevuelve(
+      JSON.stringify({
+        intencion: "charla_general",
+        entidades: null,
+        confianza: 1,
+        faltantes: ["nombre"],
+        respuesta: "¡Hola!",
+      }),
+    );
+    const r = await interpretar("quien eres?", { ...OPTS_HOY, chat });
+    expect(r.usoFallback).toBe(false);
+    expect(r.intencion.intencion).toBe("charla_general");
+    expect(r.intencion.faltantes).toEqual([]);
+  });
+
   it("deduplica 'faltantes' repetidos del modelo", async () => {
     const chat = chatQueDevuelve(
       JSON.stringify({
@@ -100,6 +116,31 @@ describe("interpretar()", () => {
     );
     expect(r.intencion.intencion).toBe("desconocida");
     expect(r.intencion.entidades).toEqual({});
+  });
+
+  it("charla_general conserva el campo 'respuesta' hasta la salida", async () => {
+    const chat = chatQueDevuelve(
+      JSON.stringify({
+        intencion: "charla_general",
+        entidades: {},
+        confianza: 0.9,
+        faltantes: [],
+        respuesta: "¡Hola! Soy el asistente de La Fisioterapeuta Li.",
+      }),
+    );
+    const r = await interpretar("hola", { ...OPTS_HOY, chat });
+    expect(r.usoFallback).toBe(false);
+    expect(r.intencion.intencion).toBe("charla_general");
+    expect(r.intencion.respuesta).toBe("¡Hola! Soy el asistente de La Fisioterapeuta Li.");
+  });
+
+  it("una intención distinta de charla_general no necesita 'respuesta'", async () => {
+    const chat = chatQueDevuelve(
+      JSON.stringify({ intencion: "consultar_agenda", entidades: {}, confianza: 0.9, faltantes: [] }),
+    );
+    const r = await interpretar("¿qué tengo hoy?", { ...OPTS_HOY, chat });
+    expect(r.usoFallback).toBe(false);
+    expect(r.intencion.respuesta).toBeUndefined();
   });
 
   it("aunque el modelo 'obedezca' la inyección, la salida sigue limitada al contrato", async () => {

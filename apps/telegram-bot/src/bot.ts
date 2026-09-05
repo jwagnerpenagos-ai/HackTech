@@ -3,12 +3,14 @@ import type { UserFromGetMe } from "grammy/types";
 import type { Config } from "./config.js";
 import { logger } from "./logger.js";
 import { esAutorizado, nivelDeAcceso } from "./auth.js";
-import { AYUDA, PONG, inicio, miId, noAutorizado } from "./commands.js";
+import { AYUDA, PONG, inicio, miId } from "./commands.js";
 import { RateLimiter } from "./ratelimit.js";
 import {
   estadoInicial,
+  pedirDatosDeRegistro,
   procesarTexto,
   resolverConfirmacion,
+  resolverOfertaCalendar,
   type Accion,
   type EstadoConversacion,
 } from "./conversation.js";
@@ -64,7 +66,57 @@ async function responderAccion(
     "accion a ejecutar",
   );
   const resultado = await n8n(cfg, accion.intencion, accion.entidades, String(chatId));
+
+  // Primera cita: core-api pide nombre/teléfono antes de poder reservar.
+  // En vez de un mensaje final, se reentra al bucle de "pedir_dato" para
+  // completar esos campos y reintentar el mismo crear_sesion.
+  if (accion.intencion === "crear_sesion" && resultado.tipo === "error_negocio" && resultado.codigo === "registro_requerido") {
+    const camposFaltantes = camposFaltantesDeRegistro(resultado.datos);
+    if (camposFaltantes !== null && camposFaltantes.length > 0) {
+      const r = pedirDatosDeRegistro(accion.entidades, camposFaltantes);
+      ctx.session = r.estado;
+      await ctx.reply(textoDeAccion(r.accion));
+      return;
+    }
+  }
+
   await ctx.reply(formatearResultado(accion.intencion, resultado));
+
+  // Fase 3, opcional: core-api solo manda `pacienteId` cuando quien reservó
+  // fue el propio paciente por chat (no cuando Lina/admin reserva por otro)
+  // — ver comandos.ts. Ahí sí tiene sentido ofrecerle a ESTE chat sincronizar
+  // con SU Calendar personal.
+  if (accion.intencion === "crear_sesion" && resultado.tipo === "ok") {
+    const oferta = datosOfertaCalendar(resultado.datos);
+    if (oferta) {
+      ctx.session = { ...ctx.session, ofertaCalendarPendiente: oferta };
+      await ctx.reply("¿Querés que agregue esta cita a tu Google Calendar? (sí/no)");
+    }
+  }
+}
+
+/** `resultado.datos` es `unknown` (viene de un JSON externo): se valida antes de usarlo. */
+function camposFaltantesDeRegistro(datos: unknown): string[] | null {
+  if (typeof datos !== "object" || datos === null || !("camposFaltantes" in datos)) return null;
+  const campos = datos.camposFaltantes;
+  if (!Array.isArray(campos) || !campos.every((c) => typeof c === "string")) return null;
+  return campos;
+}
+
+function datosOfertaCalendar(datos: unknown): { reservaId: number; pacienteId: number } | null {
+  if (typeof datos !== "object" || datos === null || !("reservaId" in datos) || !("pacienteId" in datos)) {
+    return null;
+  }
+  const { reservaId, pacienteId } = datos;
+  if (typeof reservaId !== "number" || typeof pacienteId !== "number") return null;
+  return { reservaId, pacienteId };
+}
+
+function urlAutorizacionCalendar(cfg: Config, oferta: { reservaId: number; pacienteId: number }): string {
+  const url = new URL("/oauth/paciente/iniciar", cfg.GOOGLE_ADAPTER_URL);
+  url.searchParams.set("reserva_id", String(oferta.reservaId));
+  url.searchParams.set("paciente_id", String(oferta.pacienteId));
+  return url.toString();
 }
 
 function interpretarSiNo(texto: string): "si" | "no" | null {
@@ -126,8 +178,20 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
   bot.on("message:text", async (ctx) => {
     const chatId = ctx.chat.id;
 
-    if (!esAutorizado(cfg, chatId)) {
-      await ctx.reply(noAutorizado());
+    // ¿Estamos esperando el sí/no de "¿agrego esto a tu Calendar?" (fase 3)?
+    if (ctx.session.ofertaCalendarPendiente) {
+      const sn = interpretarSiNo(ctx.message.text);
+      if (sn === null) {
+        await ctx.reply('Respondé "sí" o "no".');
+        return;
+      }
+      const r = resolverOfertaCalendar(ctx.session, sn);
+      ctx.session = r.estado;
+      if (r.tipo === "aceptado") {
+        await ctx.reply(`Abrí este link para autorizar (con TU cuenta de Google):\n${urlAutorizacionCalendar(cfg, r)}`);
+      } else {
+        await ctx.reply("Listo, no se agrega al Calendar.");
+      }
       return;
     }
 
@@ -144,14 +208,13 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
       return;
     }
 
-    const r = await procesarTexto(cfg, ctx.session, ctx.message.text, nlu);
+    const r = await procesarTexto(cfg, ctx.session, ctx.message.text, nlu, esAutorizado(cfg, chatId));
     ctx.session = r.estado;
     await responderAccion(ctx, cfg, n8n, chatId, r.accion);
   });
 
   // Cualquier otro tipo de mensaje (fotos, stickers, etc.): respuesta breve.
   bot.on("message", async (ctx) => {
-    if (!esAutorizado(cfg, ctx.chat.id)) return;
     await ctx.reply("Por ahora solo entiendo texto. Usá /help.");
   });
 

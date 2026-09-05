@@ -10,6 +10,8 @@ import type { Config } from "./config.js";
  */
 
 const INTENCIONES = [
+  "charla_general",
+  "consultar_catalogo",
   "consultar_agenda",
   "consultar_disponibilidad",
   "crear_sesion",
@@ -35,6 +37,8 @@ const NOMBRES_ENTIDAD = [
   "texto",
   "carpeta",
   "consulta",
+  "telefono",
+  "email",
 ] as const;
 
 const RespuestaNlu = z
@@ -43,6 +47,8 @@ const RespuestaNlu = z
     entidades: z.record(z.string(), z.unknown()).default({}),
     confianza: z.number().min(0).max(1),
     faltantes: z.array(z.enum(NOMBRES_ENTIDAD)).default([]),
+    // Solo relevante para intencion="charla_general" — ver conversation.ts.
+    respuesta: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -51,6 +57,7 @@ export interface IntencionNlu {
   entidades: Record<string, unknown>;
   confianza: number;
   faltantes: (typeof NOMBRES_ENTIDAD)[number][];
+  respuesta?: string | null;
 }
 
 export type ResultadoNlu =
@@ -93,6 +100,7 @@ export async function interpretar(
       entidades: parsed.data.entidades,
       confianza: parsed.data.confianza,
       faltantes: parsed.data.faltantes,
+      ...(parsed.data.respuesta !== undefined ? { respuesta: parsed.data.respuesta } : {}),
     },
   };
 }
