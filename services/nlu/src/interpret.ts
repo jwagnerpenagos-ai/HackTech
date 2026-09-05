@@ -10,7 +10,7 @@ import { ollamaChat, OllamaError } from "./ollama.js";
 type ChatFn = typeof ollamaChat;
 import { construirSystemPrompt, PREFIJO_USUARIO } from "./prompt.js";
 import { sanearMensaje } from "./sanitize.js";
-import { buscarContexto } from "./conocimiento.js";
+import { cargarConocimiento } from "./conocimiento.js";
 
 export type MotivoFallback =
   | "mensaje_vacio"
@@ -126,7 +126,8 @@ export async function interpretar(
   }
 
   const hoy = opts.hoy ?? hoyEnZona(cfg.TIMEZONE);
-  const contexto = buscarContexto(texto);
+  // Corpus completo: el modelo lo usa solo si clasifica charla_general (ver prompt).
+  const contexto = cargarConocimiento();
   const system = construirSystemPrompt(hoy, cfg.TIMEZONE, contexto);
 
   let contenido: string;

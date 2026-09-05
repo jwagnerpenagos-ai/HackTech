@@ -48,7 +48,7 @@ npm run lint && npm run typecheck
 npm run build                     # -> dist/
 ```
 
-El modelo se descarga una vez: `ollama pull llama3.1:8b`.
+El modelo se descarga una vez: `ollama pull qwen2.5:7b-instruct` (~4.7 GB).
 
 ## Estructura
 

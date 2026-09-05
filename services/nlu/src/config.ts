@@ -17,7 +17,10 @@ const EnvSchema = z.object({
   INTERNAL_API_KEY: z.string().min(16).optional(),
 
   OLLAMA_HOST: z.string().url().default("http://127.0.0.1:11434"),
-  OLLAMA_MODEL: z.string().min(1).default("llama3.1:8b"),
+  // qwen2.5:7b-instruct: mejor que llama3.1:8b para español + salida JSON, y
+  // el 3B se quedaba corto clasificando 13 intenciones (ver historial). Un
+  // modelo < 7B degrada bastante la clasificación.
+  OLLAMA_MODEL: z.string().min(1).default("qwen2.5:7b-instruct"),
   NLU_OLLAMA_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),
 
   TIMEZONE: z.string().min(1).default("America/Bogota"),

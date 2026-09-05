@@ -62,7 +62,14 @@ export async function ollamaChat(opts: OllamaChatOpts): Promise<OllamaChatResult
         messages: opts.messages,
         stream: false,
         format: "json",
-        options: { temperature: 0, num_ctx: 4096 },
+        // Mantener el modelo residente entre mensajes: el cold-load de un 7B
+        // puede pasarse del timeout y romper el primer mensaje tras un rato
+        // de inactividad (Ollama lo descarga a los 5 min por defecto).
+        keep_alive: "30m",
+        // num_ctx holgado: el system prompt lleva reglas + descripciones +
+        // few-shot + el corpus completo de conocimiento/. Si se desborda,
+        // Ollama trunca por el principio (¡el system!), así que sobra margen.
+        options: { temperature: 0, num_ctx: 8192 },
       }),
       signal: AbortSignal.timeout(opts.timeoutMs),
     });
