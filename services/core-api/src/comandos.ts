@@ -40,6 +40,33 @@ function camposFaltantes(intencion: IntencionEjecutable, entidades: Entidades): 
 }
 
 /**
+ * Sede según el día de la semana, por la regla del consultorio (doc de Lina):
+ * Tunja de lunes a viernes, Turmequé sábados y domingos. El paciente no elige
+ * sede — se deriva de la fecha cuando el canal no la mandó explícita.
+ */
+function sedePorFecha(fecha: string): string | null {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  const dia = d.getUTCDay(); // 0 = domingo … 6 = sábado
+  return dia === 0 || dia === 6 ? "Turmequé" : "Tunja";
+}
+
+/** Etiqueta en español para los campos que el usuario podría tener que aportar. */
+const ETIQUETA_CAMPO = new Map<string, string>([
+  ["servicio", "el servicio"],
+  ["sede", "la sede"],
+  ["fecha", "la fecha"],
+  ["hora", "la hora"],
+  ["sesion_id", "el número de la cita"],
+  ["cliente", "el nombre del paciente"],
+  ["destinatario", "el destinatario"],
+  ["asunto", "el asunto"],
+  ["texto", "el contenido"],
+  ["carpeta", "el nombre de la carpeta"],
+  ["consulta", "qué buscar"],
+]);
+
+/**
  * Saca un valor de `entidades` ya sabiendo (por `camposFaltantes`) que no
  * debería faltar. Si de todos modos falta, lanza en vez de asumir: así el
  * dominio nunca recibe `null`/`undefined` sin pasar por un `as`/`!` que
@@ -90,13 +117,28 @@ export async function ejecutarComando(
   // eso siempre se valida con Number.isSafeInteger antes de usarlo como tal.
   ctx: { creadoPor?: string | null; esAdmin?: boolean } = {},
 ): Promise<ResultadoComando> {
+  // El paciente no elige sede: la define el día (Tunja L-V, Turmequé S-D).
+  // Solo se deriva si el canal no la mandó explícita.
+  if (
+    (intencion === "crear_sesion" || intencion === "consultar_disponibilidad") &&
+    (entidades.sede === undefined || entidades.sede === null) &&
+    typeof entidades.fecha === "string"
+  ) {
+    const sede = sedePorFecha(entidades.fecha);
+    if (sede !== null) entidades = { ...entidades, sede };
+  }
+
   const faltan = camposFaltantes(intencion, entidades);
   if (faltan.length > 0) {
-    return errorComando(
-      "datos_incompletos",
-      `Faltan datos para "${intencion}": ${faltan.join(", ")}.`,
-      422,
-    );
+    return {
+      ok: false,
+      datos: { camposFaltantes: faltan },
+      error: {
+        codigo: "datos_incompletos",
+        mensaje: `Me falta un dato para continuar: ${faltan.map((c) => ETIQUETA_CAMPO.get(c) ?? c).join(", ")}.`,
+        status: 422,
+      },
+    };
   }
 
   try {
@@ -184,7 +226,7 @@ export async function ejecutarComando(
                 datos: { camposFaltantes: faltanRegistro },
                 error: {
                   codigo: "registro_requerido",
-                  mensaje: "Es tu primera cita: necesito tu nombre completo y tu teléfono para registrarte.",
+                  mensaje: "Es su primera cita: necesito su nombre completo y su teléfono para registrarlo.",
                   status: 422,
                 },
               };
@@ -235,8 +277,8 @@ export async function ejecutarComando(
         if (paciente.email) {
           await integraciones.enviarCorreo(db, {
             destinatario: paciente.email,
-            asunto: "Confirmación de tu cita — La Fisioterapeuta Li",
-            texto: `Hola ${paciente.nombreCompleto}, tu cita de ${servicio.nombre} en ${sede.nombre} quedó agendada para el ${fecha} a las ${hora}.`,
+            asunto: "Confirmación de su cita — La Fisioterapeuta Li",
+            texto: `Hola ${paciente.nombreCompleto}, su cita de ${servicio.nombre} en ${sede.nombre} quedó agendada para el ${fecha} a las ${hora}.`,
           });
         }
 

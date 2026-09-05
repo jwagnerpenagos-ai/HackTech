@@ -102,6 +102,38 @@ describe("ejecutarComando", () => {
     expect(llamadas).toHaveLength(1);
   });
 
+  it("consultar_disponibilidad sin sede: la deriva del día (entre semana -> Tunja)", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
+      [{ id: 1, nombre: "Tunja" }],
+      [{ slot_inicio: "2026-09-16T15:00:00-05:00", slot_fin: "2026-09-16T15:40:00-05:00" }],
+    ]);
+    const r = await ejecutarComando(db, "consultar_disponibilidad", {
+      servicio: "punción",
+      fecha: "2026-09-16", // miércoles
+    });
+    expect(r.ok).toBe(true);
+    expect((r.datos as { sede: string }).sede).toBe("Tunja");
+    expect(llamadas).toHaveLength(3);
+  });
+
+  it("crear_sesion sin sede un fin de semana: la deriva a Turmequé", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [{ id: 5, nombre_completo: "Laura Gómez", telefono: "3001234567", email: null }],
+      [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
+      [{ id: 2, nombre: "Turmequé" }],
+      [{ crear_reserva: 77 }],
+    ]);
+    const r = await ejecutarComando(
+      db,
+      "crear_sesion",
+      { servicio: "Punción", fecha: "2026-09-19", hora: "10:00" }, // sábado
+      { creadoPor: "111" },
+    );
+    expect(r.ok).toBe(true);
+    expect(llamadas.some((l) => l.valores.some((v) => String(v).includes("Turmequé")))).toBe(true);
+  });
+
   it("crear_sesion feliz: resuelve cliente, servicio y sede, y crea la reserva", async () => {
     const { db, llamadas } = crearDbFalsa([
       [{ id: 5, nombre_completo: "Laura Gómez", telefono: null }],
