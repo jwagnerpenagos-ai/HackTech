@@ -1,17 +1,17 @@
 # Base de conocimiento del asistente conversacional
 
-Estos `.md` son el contexto que usa el bot para responder charla general
-("¿quién sos?", preguntas sobre políticas, qué esperar en la primera cita,
-etc. — ver `intencion: "charla_general"` en `contracts/intents.schema.json`).
-**No** es de acá de donde salen precios/servicios/horarios — eso ya vive en
-la base de datos y lo sirve `consultar_catalogo`/`consultar_disponibilidad`.
+Contexto que usa el bot para responder charla general (intención
+`charla_general` en `contracts/intents.schema.json`): quiénes somos,
+formación, políticas, qué llevar a la cita, sedes, paquetes, promociones y
+contacto.
 
-**Contenido placeholder**: lo que hay en estos archivos es una plantilla de
-ejemplo para que el asistente tenga algo razonable que decir en la demo.
-Lina/José deben revisarlo y reemplazar los detalles reales (certificaciones,
-políticas exactas, tono) antes de usarlo en producción — nada acá debe
-tomarse como información real del consultorio.
+Precios y disponibilidad puntuales de citas **no** salen de acá: los sirven
+`consultar_catalogo` / `consultar_disponibilidad` desde la base de datos.
 
-Formato: cada `##` es un fragmento independiente que el retrieval
-(`src/conocimiento.ts`) puede devolver por separado. Párrafos cortos, en
-español, sin tecnicismos — es lo que el modelo va a citar casi textual.
+Contenido real provisto por Lina Murillo (doc `La Fisioterapeuta Li.md` en la
+raíz del repo). Al actualizarlo, mantené los fragmentos cortos: todo esto
+entra en el prompt del modelo en cada mensaje.
+
+Formato: cada `##` es un fragmento independiente. El servicio los carga todos
+(`src/conocimiento.ts`), sin recuperación por palabras clave — el corpus es
+chico y cabe entero en el prompt.

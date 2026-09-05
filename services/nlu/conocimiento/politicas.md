@@ -1,18 +1,22 @@
-<!-- PLANTILLA DE EJEMPLO — reemplazar con la info real antes de usar en producción. -->
+<!-- Contenido real provisto por Lina Murillo. -->
 
-## Cancelar o reprogramar
+## Reserva de la cita
 
-Podés cancelar o reprogramar tu cita escribiéndole al asistente. Te pedimos
-avisar con anticipación — cancelar con muy poco tiempo puede no permitir que
-otra persona ocupe ese espacio.
+Para confirmar cualquier consulta o terapia se requiere el pago por
+adelantado del 100%.
 
-## Pagos
+## Reprogramación y cancelación
 
-Los pagos se manejan directamente en el consultorio. El asistente no procesa
-pagos ni cobros.
+Los cambios de agenda deben hacerse con mínimo 24 a 48 horas (1 a 2 días) de
+anticipación. Si el paciente no asiste o cancela fuera de ese plazo, la cita
+se da por realizada y se pierde el valor pagado.
+
+## Medios de pago
+
+- Nequi / Llave: 3113981422 (titular: Lina Murillo).
+- Efectivo.
 
 ## Datos personales
 
-Tus datos (nombre, teléfono, correo) se guardan solo para gestionar tus
-citas y contactarte por temas del consultorio — no se comparten con
-terceros.
+Sus datos (nombre, teléfono, correo) se usan solo para gestionar sus citas y
+contactarlo por temas del consultorio. No se comparten con terceros.

@@ -1,19 +1,22 @@
-<!-- PLANTILLA DE EJEMPLO — reemplazar con la info real antes de usar en producción. -->
+<!-- Contenido real provisto por Lina Murillo. -->
 
-## Qué esperar en tu primera cita
+## Qué esperar en la primera cita
 
-En la primera cita hacemos una valoración: conversamos sobre tu motivo de
-consulta, antecedentes y expectativas, y hacemos una evaluación física antes
-de armar un plan de tratamiento. Suele durar un poco más que las sesiones de
-seguimiento.
+La primera cita es una valoración: se conversa el motivo de consulta y los
+antecedentes, se hace una evaluación física y se define el plan de
+tratamiento.
 
-## Qué llevar
+## Qué llevar — ejercicio y rehabilitación física
 
-Ropa cómoda que te permita moverte con libertad, y si tenés, exámenes o
-informes médicos relacionados con el motivo de consulta.
+Ropa cómoda o deportiva, calzado adecuado para ejercicio, hidratación
+personal y, si lo desea, una toalla para el sudor (opcional). Llegue de 5 a
+10 minutos antes.
 
-## Puntualidad
+## Qué llevar — descargas musculares
 
-Te pedimos llegar unos minutos antes de tu hora agendada. Si llegás tarde,
-puede que se acorte el tiempo disponible de tu sesión para no afectar la
-cita de la siguiente persona.
+Ropa cómoda que permita trabajar las distintas zonas del cuerpo,
+hidratación y, opcional, una toalla. Llegue con anticipación.
+
+## Qué llevar — punción seca, terapia neural, PRP y sueroterapia
+
+Ropa holgada y cómoda que dé acceso a la zona a tratar. Puntualidad estricta.
