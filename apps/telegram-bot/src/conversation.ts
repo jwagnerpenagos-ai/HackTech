@@ -43,7 +43,16 @@ export type Accion =
   | { tipo: "responder"; texto: string }
   | { tipo: "pedir_dato"; texto: string }
   | { tipo: "pedir_confirmacion"; texto: string; intencion: string }
-  | { tipo: "ejecutar"; texto: string; intencion: string; entidades: Record<string, string | number> };
+  | { tipo: "ejecutar"; texto: string; intencion: string; entidades: Record<string, string | number> }
+  // El usuario preguntó algo de solo lectura (catálogo, agenda, disponibilidad)
+  // en medio de un flujo de datos: bot.ts resuelve la consulta, muestra el
+  // resultado y luego responde `rePrompt` para retomar el dato que faltaba.
+  | {
+      tipo: "consulta_y_retomar";
+      intencion: string;
+      entidades: Record<string, string | number>;
+      rePrompt: string;
+    };
 
 export interface Procesado {
   estado: EstadoConversacion;
@@ -54,22 +63,48 @@ const ETIQUETA_DATO = new Map<string, string>([
   ["cliente", "el nombre del paciente"],
   ["servicio", "el servicio"],
   ["sede", "la sede"],
-  ["fecha", "la fecha (YYYY-MM-DD)"],
-  ["hora", "la hora (HH:MM)"],
+  ["fecha", "la fecha (por ejemplo, 2026-09-15)"],
+  ["hora", "la hora (por ejemplo, 15:00)"],
   ["sesion_id", "el número de la cita"],
   ["destinatario", "el destinatario"],
   ["asunto", "el asunto"],
   ["texto", "el contenido"],
   ["carpeta", "el nombre de la carpeta"],
-  ["consulta", "qué quieres buscar"],
-  ["telefono", "tu número de teléfono"],
-  ["email", "tu correo"],
+  ["consulta", "qué desea buscar"],
+  ["telefono", "su número de teléfono"],
+  ["email", "su correo"],
 ]);
 
 function resumen(intencion: string, entidades: Record<string, string | number>): string {
   const partes = Object.entries(entidades).map(([k, v]) => `${k}: ${String(v)}`);
   return partes.length > 0 ? `${intencion} — ${partes.join(", ")}` : intencion;
 }
+
+function textoPedirDato(slot: string): string {
+  const etiqueta = ETIQUETA_DATO.get(slot) ?? slot;
+  return `Para continuar necesito ${etiqueta}.`;
+}
+
+const PALABRAS_PREGUNTA =
+  /(^|\s)(qu[eé]|cu[aá]l(es)?|cu[aá]nto?s?|c[oó]mo|d[oó]nde|cu[aá]ndo|qui[eé]n|hay|tienen|ten[eé]s|ofrecen|ofreces|puedo|pod[eé]s|podr[ií]a|sirve|explic|cu[eé]nt|cont[aá]|mostr|dec[ií]|dime)/i;
+
+/**
+ * Heurística barata para decidir, cuando estamos rellenando un dato, si el
+ * mensaje es la respuesta al dato (corto y sin forma de pregunta) o es otra
+ * cosa (una pregunta, un cambio de tema) que conviene reinterpretar con el NLU.
+ */
+export function pareceValorDirecto(texto: string): boolean {
+  const t = texto.trim();
+  if (t.includes("?") || t.includes("¿")) return false;
+  if (PALABRAS_PREGUNTA.test(t)) return false;
+  return t.split(/\s+/).filter(Boolean).length <= 6;
+}
+
+/** Intenciones de solo lectura que se pueden resolver "de paso" sin abandonar un flujo. */
+const SOLO_LECTURA = new Set(["consultar_catalogo", "consultar_agenda", "consultar_disponibilidad"]);
+
+/** Confianza mínima para que una intención nueva interrumpa un flujo en curso. */
+const UMBRAL_CAMBIO_TEMA = 0.8;
 
 function armarDesdeIntencion(intn: IntencionNlu): EstadoConversacion {
   return {
@@ -84,10 +119,9 @@ function armarDesdeIntencion(intn: IntencionNlu): EstadoConversacion {
 function siguientePaso(estado: EstadoConversacion): Procesado {
   const primeroFaltante = estado.faltantes[0];
   if (primeroFaltante !== undefined) {
-    const etiqueta = ETIQUETA_DATO.get(primeroFaltante) ?? primeroFaltante;
     return {
       estado,
-      accion: { tipo: "pedir_dato", texto: `Para continuar necesito ${etiqueta}.` },
+      accion: { tipo: "pedir_dato", texto: textoPedirDato(primeroFaltante) },
     };
   }
   const intencion = estado.intencion ?? "desconocida";
@@ -97,7 +131,7 @@ function siguientePaso(estado: EstadoConversacion): Procesado {
       accion: {
         tipo: "pedir_confirmacion",
         intencion,
-        texto: `Vas a: ${resumen(intencion, estado.entidades)}.\n¿Confirmas? (sí / no)`,
+        texto: `Va a: ${resumen(intencion, estado.entidades)}.\n¿Confirma? (sí / no)`,
       },
     };
   }
@@ -129,18 +163,14 @@ export async function procesarTexto(
 ): Promise<Procesado> {
   const { texto } = sanearMensaje(entrada);
   if (texto.length === 0) {
-    return { estado: estadoPrevio, accion: { tipo: "responder", texto: "No recibí texto." } };
+    return { estado: estadoPrevio, accion: { tipo: "responder", texto: "No recibí ningún texto." } };
   }
 
-  // Si veníamos rellenando datos, este mensaje es el valor del primer faltante.
+  // Si veníamos rellenando datos, este mensaje suele ser el valor del primer
+  // faltante — pero puede ser una pregunta o un cambio de tema. Ver
+  // `manejarMensajeEnFlujo`.
   if (estadoPrevio.intencion !== null && estadoPrevio.faltantes.length > 0) {
-    const [slot, ...resto] = estadoPrevio.faltantes;
-    const estado: EstadoConversacion = {
-      ...estadoPrevio,
-      entidades: { ...estadoPrevio.entidades, ...(slot !== undefined ? { [slot]: texto } : {}) },
-      faltantes: resto,
-    };
-    return siguientePaso(estado);
+    return manejarMensajeEnFlujo(cfg, estadoPrevio, texto, nlu, autorizado);
   }
 
   // Mensaje nuevo: se interpreta con el NLU.
@@ -150,27 +180,99 @@ export async function procesarTexto(
       estado: estadoPrevio,
       accion: {
         tipo: "responder",
-        texto:
-          "No pude interpretar el mensaje ahora mismo. Usá /help para ver los comandos disponibles.",
+        texto: "No pude procesar su mensaje en este momento. Intente de nuevo o use /help.",
       },
     };
   }
 
-  const intn = r.intencion;
+  return manejarIntencionNueva(cfg, r.intencion, autorizado);
+}
+
+/** Llena el primer faltante con `valor` y avanza el flujo. */
+function llenarFaltante(estado: EstadoConversacion, valor: string): Procesado {
+  const [slot, ...resto] = estado.faltantes;
+  return siguientePaso({
+    ...estado,
+    entidades: { ...estado.entidades, ...(slot !== undefined ? { [slot]: valor } : {}) },
+    faltantes: resto,
+  });
+}
+
+/**
+ * Mensaje recibido mientras se rellenan datos de un flujo (p. ej. `crear_sesion`
+ * pidiendo servicio/fecha/hora). Si parece un valor, lo usa como respuesta al
+ * dato. Si parece una pregunta o un cambio de tema, lo reinterpreta:
+ *  - charla / info → responde y retoma el mismo dato.
+ *  - consulta de solo lectura → la resuelve "de paso" y retoma (bot.ts).
+ *  - otra acción con confianza alta → abandona el flujo y atiende lo nuevo.
+ *  - nada claro → lo toma igual como valor del dato.
+ */
+async function manejarMensajeEnFlujo(
+  cfg: Config,
+  estadoPrevio: EstadoConversacion,
+  texto: string,
+  nlu: (cfg: Config, mensaje: string) => Promise<ResultadoNlu>,
+  autorizado: boolean,
+): Promise<Procesado> {
+  const slot = estadoPrevio.faltantes[0];
+
+  if (pareceValorDirecto(texto)) return llenarFaltante(estadoPrevio, texto);
+
+  const r = await nlu(cfg, texto);
+  if (r.ok) {
+    const otra = r.intencion;
+    const rePrompt = slot !== undefined ? `Sigamos con su cita. ${textoPedirDato(slot)}` : "";
+
+    if (otra.intencion === "charla_general") {
+      const resp = otra.respuesta?.trim();
+      const cuerpo = resp !== undefined && resp.length > 0 ? resp : "Con gusto.";
+      return {
+        estado: estadoPrevio,
+        accion: { tipo: "responder", texto: rePrompt.length > 0 ? `${cuerpo}\n\n${rePrompt}` : cuerpo },
+      };
+    }
+
+    if (SOLO_LECTURA.has(otra.intencion) && otra.confianza >= cfg.BOT_CONFIANZA_MINIMA) {
+      return {
+        estado: estadoPrevio,
+        accion: {
+          tipo: "consulta_y_retomar",
+          intencion: otra.intencion,
+          entidades: entidadesTexto(otra.entidades),
+          rePrompt,
+        },
+      };
+    }
+
+    if (
+      otra.intencion !== "desconocida" &&
+      otra.intencion !== estadoPrevio.intencion &&
+      otra.confianza >= UMBRAL_CAMBIO_TEMA
+    ) {
+      return manejarIntencionNueva(cfg, otra, autorizado);
+    }
+  }
+
+  // No se pudo reinterpretar o no era nada claro: se toma como valor del dato.
+  return llenarFaltante(estadoPrevio, texto);
+}
+
+/**
+ * Rutea una intención recién interpretada por el NLU (mensaje nuevo o cambio
+ * de tema): charla, allowlist admin, umbral de confianza, o arranque de flujo.
+ */
+function manejarIntencionNueva(cfg: Config, intn: IntencionNlu, autorizado: boolean): Procesado {
   if (intn.intencion === "desconocida") {
     return {
       estado: estadoInicial(),
-      accion: {
-        tipo: "responder",
-        texto: "No entendí la solicitud. Probá con /help o reformulá.",
-      },
+      accion: { tipo: "responder", texto: "No entendí su solicitud. Escriba /help para ver qué puedo hacer." },
     };
   }
 
   // Saludo, "¿quién sos?", preguntas generales del consultorio: se responde
   // directo con lo que armó el NLU (grounded en services/nlu/conocimiento/),
-  // sin pasar por la allowlist admin ni el umbral de confianza — nunca
-  // llega a n8n/core-api, es puro texto informativo.
+  // sin pasar por la allowlist admin ni el umbral de confianza — nunca llega a
+  // n8n/core-api, es puro texto informativo.
   if (intn.intencion === "charla_general") {
     const respuesta = intn.respuesta?.trim();
     return {
@@ -180,7 +282,7 @@ export async function procesarTexto(
         texto:
           respuesta !== undefined && respuesta.length > 0
             ? respuesta
-            : "¡Hola! ¿En qué te puedo ayudar? Escribí /help para ver ejemplos.",
+            : "Hola. ¿En qué le puedo ayudar?",
       },
     };
   }
@@ -197,12 +299,23 @@ export async function procesarTexto(
       estado: estadoInicial(),
       accion: {
         tipo: "responder",
-        texto: `Creo que querés "${intn.intencion}" pero no estoy seguro. ¿Podés decirlo de otra forma?`,
+        texto: "No entendí bien. ¿Puede decirlo de otra forma? Con /help ve lo que puedo hacer.",
       },
     };
   }
 
   return siguientePaso(armarDesdeIntencion(intn));
+}
+
+/** Arranca el flujo de "quiero agendar una cita" desde un botón del menú. */
+export function iniciarAgendamiento(): Procesado {
+  return siguientePaso({
+    intencion: "crear_sesion",
+    entidades: {},
+    faltantes: ["servicio", "fecha", "hora"],
+    esperandoConfirmacion: false,
+    ofertaCalendarPendiente: null,
+  });
 }
 
 /**

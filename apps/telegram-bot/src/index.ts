@@ -19,6 +19,22 @@ function main(): void {
     });
   }
 
+  // Menú nativo de comandos de Telegram (el botón "/" del cliente).
+  void bot.api
+    .setMyCommands([
+      { command: "start", description: "Presentación y menú" },
+      { command: "help", description: "Ayuda y ejemplos" },
+      { command: "cancelar", description: "Cancelar la acción en curso" },
+      { command: "id", description: "Ver mi chat_id" },
+      { command: "ping", description: "Probar que el bot responde" },
+    ])
+    .catch((err: unknown) => {
+      logger.warn(
+        { err: err instanceof Error ? err.message : "desconocido" },
+        "no se pudo registrar el menú de comandos",
+      );
+    });
+
   logger.info(
     { entorno: cfg.TELEGRAM_ENTORNO, autorizados: cfg.allowedChatIds.size },
     "arrancando bot en long polling",

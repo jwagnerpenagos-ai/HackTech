@@ -1,12 +1,25 @@
-import { Bot, type Context, session, type SessionFlavor } from "grammy";
+import { Bot, type Context, InlineKeyboard, session, type SessionFlavor } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { Config } from "./config.js";
 import { logger } from "./logger.js";
 import { esAutorizado, nivelDeAcceso } from "./auth.js";
-import { AYUDA, PONG, inicio, miId } from "./commands.js";
+import {
+  AYUDA,
+  CANCELADO,
+  INFO_ACCIONES,
+  INFO_CITA,
+  INFO_HORARIOS,
+  INFO_PAGO,
+  INFO_QUIENES,
+  MENU_ACCIONES,
+  PONG,
+  inicio,
+  miId,
+} from "./commands.js";
 import { RateLimiter } from "./ratelimit.js";
 import {
   estadoInicial,
+  iniciarAgendamiento,
   pedirDatosDeRegistro,
   procesarTexto,
   resolverConfirmacion,
@@ -41,8 +54,25 @@ export interface DepsBot {
 }
 
 function textoDeAccion(accion: Accion): string {
-  return accion.texto;
+  return accion.tipo === "consulta_y_retomar" ? accion.rePrompt : accion.texto;
 }
+
+/** Arma un teclado inline de 2 botones por fila. */
+function tecladoDe(acciones: readonly { texto: string; data: string }[]): InlineKeyboard {
+  const teclado = new InlineKeyboard();
+  acciones.forEach((accion, i) => {
+    teclado.text(accion.texto, accion.data);
+    if (i % 2 === 1) teclado.row();
+  });
+  return teclado;
+}
+
+const INFO_TEXTOS: Record<string, string> = {
+  "info:horarios": INFO_HORARIOS,
+  "info:quienes": INFO_QUIENES,
+  "info:pago": INFO_PAGO,
+  "info:cita": INFO_CITA,
+};
 
 /**
  * Cuando la acción es "ejecutar", el texto de `conversation.ts` es solo un
@@ -57,6 +87,15 @@ async function responderAccion(
   chatId: number,
   accion: Accion,
 ): Promise<void> {
+  // El usuario preguntó algo de solo lectura en medio de un flujo: se resuelve
+  // la consulta y se le recuerda el dato que faltaba (la sesión sigue en el flujo).
+  if (accion.tipo === "consulta_y_retomar") {
+    const resultado = await n8n(cfg, accion.intencion, accion.entidades, String(chatId));
+    await ctx.reply(formatearResultado(accion.intencion, resultado));
+    if (accion.rePrompt.length > 0) await ctx.reply(accion.rePrompt);
+    return;
+  }
+
   if (accion.tipo !== "ejecutar") {
     await ctx.reply(textoDeAccion(accion));
     return;
@@ -67,10 +106,14 @@ async function responderAccion(
   );
   const resultado = await n8n(cfg, accion.intencion, accion.entidades, String(chatId));
 
-  // Primera cita: core-api pide nombre/teléfono antes de poder reservar.
-  // En vez de un mensaje final, se reentra al bucle de "pedir_dato" para
-  // completar esos campos y reintentar el mismo crear_sesion.
-  if (accion.intencion === "crear_sesion" && resultado.tipo === "error_negocio" && resultado.codigo === "registro_requerido") {
+  // core-api pide datos que faltan antes de poder reservar (nombre/teléfono en
+  // la primera cita, o algún campo que el NLU no capturó). En vez de un mensaje
+  // final, se reentra al bucle de "pedir_dato" para completarlos y reintentar.
+  if (
+    accion.intencion === "crear_sesion" &&
+    resultado.tipo === "error_negocio" &&
+    (resultado.codigo === "registro_requerido" || resultado.codigo === "datos_incompletos")
+  ) {
     const camposFaltantes = camposFaltantesDeRegistro(resultado.datos);
     if (camposFaltantes !== null && camposFaltantes.length > 0) {
       const r = pedirDatosDeRegistro(accion.entidades, camposFaltantes);
@@ -90,7 +133,7 @@ async function responderAccion(
     const oferta = datosOfertaCalendar(resultado.datos);
     if (oferta) {
       ctx.session = { ...ctx.session, ofertaCalendarPendiente: oferta };
-      await ctx.reply("¿Querés que agregue esta cita a tu Google Calendar? (sí/no)");
+      await ctx.reply("¿Desea que agregue esta cita a su Google Calendar? (sí/no)");
     }
   }
 }
@@ -163,16 +206,48 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
   });
 
   bot.command("start", async (ctx) => {
-    await ctx.reply(inicio(nivelDeAcceso(cfg, ctx.chat.id)));
+    ctx.session = estadoInicial();
+    await ctx.reply(inicio(nivelDeAcceso(cfg, ctx.chat.id)), { reply_markup: tecladoDe(MENU_ACCIONES) });
   });
   bot.command("help", async (ctx) => {
     await ctx.reply(AYUDA);
+  });
+  bot.command("cancelar", async (ctx) => {
+    ctx.session = estadoInicial();
+    await ctx.reply(CANCELADO);
   });
   bot.command("id", async (ctx) => {
     await ctx.reply(miId(ctx.chat.id));
   });
   bot.command("ping", async (ctx) => {
     await ctx.reply(PONG);
+  });
+
+  // Botones del menú de /start.
+  bot.callbackQuery("menu:catalogo", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const resultado = await n8n(cfg, "consultar_catalogo", {}, String(ctx.chat?.id ?? ""));
+    await ctx.reply(formatearResultado("consultar_catalogo", resultado));
+  });
+  bot.callbackQuery("menu:agenda", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const resultado = await n8n(cfg, "consultar_agenda", {}, String(ctx.chat?.id ?? ""));
+    await ctx.reply(formatearResultado("consultar_agenda", resultado));
+  });
+  bot.callbackQuery("menu:agendar", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const r = iniciarAgendamiento();
+    ctx.session = r.estado;
+    await ctx.reply(textoDeAccion(r.accion));
+  });
+  bot.callbackQuery("menu:info", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("¿Sobre qué desea información?", { reply_markup: tecladoDe(INFO_ACCIONES) });
+  });
+  bot.callbackQuery(/^info:(horarios|quienes|pago|cita)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const texto = INFO_TEXTOS[ctx.callbackQuery.data];
+    if (texto !== undefined) await ctx.reply(texto);
   });
 
   bot.on("message:text", async (ctx) => {
@@ -182,15 +257,15 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
     if (ctx.session.ofertaCalendarPendiente) {
       const sn = interpretarSiNo(ctx.message.text);
       if (sn === null) {
-        await ctx.reply('Respondé "sí" o "no".');
+        await ctx.reply('Por favor responda "sí" o "no".');
         return;
       }
       const r = resolverOfertaCalendar(ctx.session, sn);
       ctx.session = r.estado;
       if (r.tipo === "aceptado") {
-        await ctx.reply(`Abrí este link para autorizar (con TU cuenta de Google):\n${urlAutorizacionCalendar(cfg, r)}`);
+        await ctx.reply(`Abra este enlace para autorizar el acceso, con su propia cuenta de Google:\n${urlAutorizacionCalendar(cfg, r)}`);
       } else {
-        await ctx.reply("Listo, no se agrega al Calendar.");
+        await ctx.reply("Listo, no la agrego al calendario.");
       }
       return;
     }
@@ -199,7 +274,7 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
     if (ctx.session.esperandoConfirmacion) {
       const sn = interpretarSiNo(ctx.message.text);
       if (sn === null) {
-        await ctx.reply('Respondé "sí" o "no" para confirmar o cancelar.');
+        await ctx.reply('Responda "sí" o "no" para confirmar o cancelar.');
         return;
       }
       const r = resolverConfirmacion(ctx.session, sn);
@@ -215,7 +290,7 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
 
   // Cualquier otro tipo de mensaje (fotos, stickers, etc.): respuesta breve.
   bot.on("message", async (ctx) => {
-    await ctx.reply("Por ahora solo entiendo texto. Usá /help.");
+    await ctx.reply("Por ahora solo puedo leer mensajes de texto. Use /help.");
   });
 
   bot.catch((err) => {

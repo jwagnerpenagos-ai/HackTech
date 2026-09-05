@@ -114,7 +114,7 @@ describe("bot (integración)", () => {
     const { bot, enviados } = crearBotDePrueba(nlu, n8n);
     await bot.handleUpdate(updateTexto("bloqueame el 24 de diciembre en Tunja", 500));
     expect(n8nLlamado).toBe(false);
-    expect(enviados[0]).toContain("no está autorizado");
+    expect(enviados[0]).toContain("no tiene permiso");
   });
 
   it("texto libre de un chat autorizado sí pasa por el NLU y ejecuta vía n8n", async () => {
@@ -154,7 +154,7 @@ describe("bot (integración)", () => {
 
     await bot.handleUpdate(updateTexto("cancela mi cita 9", 111));
     expect(n8nLlamado).toBe(false); // todavía no confirmó
-    expect(enviados[0]).toContain("¿Confirmas?");
+    expect(enviados[0]).toContain("¿Confirma?");
 
     await bot.handleUpdate(updateTexto("sí", 111));
     expect(n8nLlamado).toBe(true);
@@ -254,7 +254,7 @@ describe("bot (integración)", () => {
 
     await bot.handleUpdate(updateTexto("agendame una cita", 500));
     await bot.handleUpdate(updateTexto("no", 500));
-    expect(enviados[2]).toContain("no se agrega");
+    expect(enviados[2]).toContain("no la agrego");
   });
 
   it("no ofrece sincronizar el Calendar cuando reserva un admin (sin pacienteId en la respuesta)", async () => {
@@ -298,6 +298,56 @@ describe("bot (integración)", () => {
     await bot.handleUpdate(updateTexto("hola", 500));
     expect(n8nLlamado).toBe(false);
     expect(enviados[0]).toBe("¡Hola! Soy el asistente de La Fisioterapeuta Li.");
+  });
+
+  it("en medio de un agendamiento, una pregunta se responde y se retoma el dato", async () => {
+    const crearSesion: ResultadoNlu = {
+      ok: true,
+      intencion: { intencion: "crear_sesion", entidades: {}, confianza: 0.95, faltantes: ["servicio", "fecha", "hora"] },
+    };
+    const catalogo: ResultadoNlu = {
+      ok: true,
+      intencion: { intencion: "consultar_catalogo", entidades: {}, confianza: 0.95, faltantes: [] },
+    };
+    let llamada = 0;
+    const nlu = () => {
+      llamada += 1;
+      return Promise.resolve(llamada === 1 ? crearSesion : catalogo);
+    };
+    const conCatalogo: ResultadoEjecucion = {
+      tipo: "ok",
+      datos: { servicios: [{ nombre: "Punción seca", duracionMinMinutos: 60, precio: 120000, moneda: "COP" }] },
+    };
+    const vacio: ResultadoEjecucion = { tipo: "ok", datos: {} };
+    const n8n: ClienteN8nPrueba = (_c, intencion) =>
+      Promise.resolve(intencion === "consultar_catalogo" ? conCatalogo : vacio);
+    const { bot, enviados } = crearBotDePrueba(nlu, n8n);
+
+    await bot.handleUpdate(updateTexto("quiero agendar una cita", 500));
+    expect(enviados[0]).toContain("servicio");
+
+    await bot.handleUpdate(updateTexto("¿qué servicios ofrecen?", 500));
+    expect(enviados[1]).toContain("Punción seca");
+    expect(enviados[2]).toContain("Sigamos con su cita");
+    expect(enviados[2]).toContain("servicio");
+  });
+
+  it("/cancelar corta el flujo en curso", async () => {
+    const nlu = () =>
+      Promise.resolve({
+        ok: true,
+        intencion: {
+          intencion: "crear_sesion",
+          entidades: {},
+          confianza: 0.95,
+          faltantes: ["servicio", "fecha", "hora"],
+        },
+      } as ResultadoNlu);
+    const { bot, enviados } = crearBotDePrueba(nlu);
+
+    await bot.handleUpdate(updateTexto("quiero agendar", 500));
+    await bot.handleUpdate(updateTexto("/cancelar", 500));
+    expect(enviados[1]).toContain("cancelé");
   });
 
   it("aplica rate limit por chat", async () => {

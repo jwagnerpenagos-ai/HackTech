@@ -130,6 +130,6 @@ export function formatearResultado(intencion: string, resultado: ResultadoEjecuc
     case "error_negocio":
       return formatearErrorNegocio(resultado.codigo, resultado.mensaje, resultado.datos);
     case "error_transporte":
-      return "No pude completar la acción ahora mismo (falló la comunicación con el sistema de agenda). Probá de nuevo en un momento.";
+      return "No pude completar la acción en este momento. Por favor intente de nuevo en un momento.";
   }
 }
