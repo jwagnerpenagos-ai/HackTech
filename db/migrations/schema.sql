@@ -438,6 +438,23 @@ CREATE INDEX vinculo_telegram_paciente_idx ON personas.vinculo_telegram (pacient
 COMMENT ON TABLE personas.vinculo_telegram IS
   'Un chat sin paciente vinculado es un desconocido: puede consultar el catálogo pero no ver ni agendar nada a nombre de otro.';
 
+-- Autorización OPCIONAL de un paciente para que su cita se agregue a su
+-- propio Google Calendar (distinta del calendario de la sede, que se
+-- sincroniza siempre vía integracion.outbox). El paciente da su
+-- consentimiento por fuera de la base (OAuth con Google); acá solo se
+-- guarda el resultado. La agrega/gestiona services/google-adapter, nunca
+-- core-api directamente (regla del README: solo google-adapter tiene
+-- credenciales OAuth).
+CREATE TABLE personas.autorizacion_calendar_paciente (
+    paciente_id   bigint PRIMARY KEY REFERENCES personas.paciente(id) ON DELETE CASCADE,
+    access_token  text NOT NULL,
+    refresh_token text NOT NULL,
+    scope         text NOT NULL,
+    expira_en     timestamptz,
+    otorgado_en   timestamptz NOT NULL DEFAULT now(),
+    revocado_en   timestamptz
+);
+
 -- Edad calculada, nunca almacenada.
 CREATE VIEW personas.v_paciente AS
 SELECT
