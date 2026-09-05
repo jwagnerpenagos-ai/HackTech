@@ -86,7 +86,7 @@ describe("GET /oauth/callback", () => {
     const app = construirServidor(db, cfg, depsFalsas());
     const res = await app.inject({ method: "GET", url: "/oauth/callback?error=access_denied" });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("Tu cita sigue confirmada");
+    expect(res.body).toContain("Su cita sigue confirmada");
     expect(llamadas).toHaveLength(0);
     await app.close();
   });
@@ -121,7 +121,7 @@ describe("GET /oauth/callback", () => {
     const app = construirServidor(db, cfg, deps);
     const res = await app.inject({ method: "GET", url: `/oauth/callback?code=abc&state=${estadoValido()}` });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("Ya quedó en tu Google Calendar");
+    expect(res.body).toContain("ya quedó en su Google Calendar");
     expect(llamadas[0]?.texto).toContain("autorizacion_calendar_paciente");
     expect(llamadas[0]?.valores).toEqual([9, "acc", "ref", "calendar.events", null]);
     expect(calendarFalso.crearEvento).toHaveBeenCalledWith(
@@ -141,7 +141,7 @@ describe("GET /oauth/callback", () => {
     const app = construirServidor(db, cfg, deps);
     const res = await app.inject({ method: "GET", url: `/oauth/callback?code=abc&state=${estadoValido()}` });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toContain("ya habías autorizado antes");
+    expect(res.body).toContain("ya había autorizado antes");
     expect(llamadas).toHaveLength(0);
     await app.close();
   });

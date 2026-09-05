@@ -92,7 +92,7 @@ export function construirServidor(db: Db, cfg?: Config, deps: DepsOAuthPaciente 
     if (!query.success) return reply.code(400).send({ error: "parametros_invalidos" });
 
     if (query.data.error) {
-      return reply.type("text/html").send(paginaHtml("No se autorizó el acceso a tu Calendar. Tu cita sigue confirmada igual."));
+      return reply.type("text/html").send(paginaHtml("No se autorizó el acceso a su Calendar. Su cita sigue confirmada igual."));
     }
     if (!query.data.code || !query.data.state) {
       return reply.code(400).send({ error: "parametros_invalidos" });
@@ -112,12 +112,12 @@ export function construirServidor(db: Db, cfg?: Config, deps: DepsOAuthPaciente 
       tokens = await deps.intercambiarCodigo(cliente, query.data.code);
     } catch (err) {
       req.log.error({ err: err instanceof Error ? err.message : String(err) }, "fallo intercambiando el código OAuth");
-      return reply.type("text/html").send(paginaHtml("No pudimos conectar tu Calendar ahora mismo. Tu cita sigue confirmada igual."));
+      return reply.type("text/html").send(paginaHtml("No pudimos conectar su Calendar en este momento. Su cita sigue confirmada igual."));
     }
     if (!tokens.refreshToken) {
       return reply
         .type("text/html")
-        .send(paginaHtml("Parece que ya habías autorizado antes. Tu cita sigue confirmada igual; probá revocar el acceso previo en tu cuenta de Google si querés reintentar."));
+        .send(paginaHtml("Parece que ya había autorizado antes. Su cita sigue confirmada igual; si desea reintentar, revoque el acceso previo en su cuenta de Google."));
     }
 
     await autorizacion.guardarAutorizacion(db, {
@@ -141,7 +141,7 @@ export function construirServidor(db: Db, cfg?: Config, deps: DepsOAuthPaciente 
       await recursos.guardarEventoCalendarPaciente(db, estado.reserva_id, { eventoId: creado.id });
     }
 
-    return reply.type("text/html").send(paginaHtml("¡Listo! Ya quedó en tu Google Calendar."));
+    return reply.type("text/html").send(paginaHtml("Listo, la cita ya quedó en su Google Calendar."));
   });
 
   return app;

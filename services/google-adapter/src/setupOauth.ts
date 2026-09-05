@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     scope: SCOPES,
   });
 
-  console.log("\n1. Iniciá sesión con LA CUENTA DE GOOGLE DE LINA y abrí este enlace:\n");
+  console.log("\n1. Inicie sesión con LA CUENTA DE GOOGLE DE LINA y abra este enlace:\n");
   console.log(authUrl);
   console.log(`\n2. Esperando el redirect en ${cfg.GOOGLE_REDIRECT_URI} …\n`);
 
@@ -65,7 +65,7 @@ function esperarCodigo(redirectUrl: URL): Promise<string> {
       const codigo = url.searchParams.get("code");
       const error = url.searchParams.get("error");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(error ? `<p>Error: ${error}. Cerrá esta pestaña.</p>` : "<p>Listo, ya podés cerrar esta pestaña.</p>");
+      res.end(error ? `<p>Error: ${error}. Cierre esta pestaña.</p>` : "<p>Listo, ya puede cerrar esta pestaña.</p>");
       server.close();
       if (error) reject(new Error(error));
       else if (codigo) resolve(codigo);
