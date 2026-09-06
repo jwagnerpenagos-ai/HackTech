@@ -5,6 +5,43 @@ import { interpretar, type IntencionNlu, type ResultadoNlu } from "./nluClient.j
 import { sanearMensaje } from "./sanitize.js";
 import { noAutorizado } from "./commands.js";
 
+/** Un servicio del catálogo, cacheado durante el flujo guiado de reserva. */
+export interface ServicioResumen {
+  nombre: string;
+  duracionMin?: number;
+  precio?: number | null;
+  moneda?: string | null;
+}
+
+/**
+ * Flujo guiado de "pedir una cita" con botones: servicio -> fecha -> hora ->
+ * confirmar. Vive en la sesión mientras el paciente lo recorre. Distinto del
+ * bucle de `faltantes` (texto): este lo maneja bot.ts con callbacks `rsv:*`.
+ */
+/** Un horario propuesto en la lista de "próximos disponibles". */
+export interface SlotPropuesto {
+  fecha: string; // YYYY-MM-DD
+  hora: string; // HH:MM (Bogotá)
+  sede: string;
+  etiqueta: string; // "mié 10/09 · 14:00"
+}
+
+export interface ReservaFlujo {
+  // "slot": eligiendo de la lista de próximos; "fecha": escribió "otro día";
+  // "hora": eligiendo de los horarios de un día concreto; "confirmar": resumen.
+  paso: "servicio" | "slot" | "fecha" | "hora" | "confirmar";
+  servicios: ServicioResumen[];
+  servicio?: string;
+  proximos?: SlotPropuesto[];
+  fecha?: string; // YYYY-MM-DD
+  hora?: string; // HH:MM (Bogotá)
+  sede?: string; // se muestra; core-api la deriva de la fecha
+  // Si está definido, este flujo NO crea una cita nueva: reprograma la cita
+  // con este id (viene del flujo de cancelar). bot.ts llama `modificar_sesion`
+  // en vez de `crear_sesion` y, si ya estaba pagada, no vuelve a pedir pago.
+  reprogramarDe?: number;
+}
+
 /** Estado conversacional que se guarda por chat mientras faltan datos. */
 export interface EstadoConversacion {
   intencion: string | null;
@@ -18,6 +55,28 @@ export interface EstadoConversacion {
    * `resolverOfertaCalendar`, igual patrón que `esperandoConfirmacion`.
    */
   ofertaCalendarPendiente: { reservaId: number; pacienteId: number } | null;
+  /** Flujo guiado de reserva en curso, si lo hay. Lo maneja bot.ts. */
+  reservaFlujo: ReservaFlujo | null;
+  /**
+   * Tras reservar, el bot espera la foto del comprobante de pago para esta
+   * cita. `monto` es lo que debe transferir; `compraId` la compra que se
+   * marca pagada al verificar. Lo maneja bot.ts (handler de fotos).
+   */
+  esperandoComprobante: { reservaId: number; compraId: number; monto: number } | null;
+  /** Flujo guiado de "cancelar una cita" (botones). Lo maneja bot.ts (callbacks `cxl:*`). */
+  cancelarFlujo: {
+    paso: "elegir" | "confirmar";
+    citas: CitaCancelable[];
+    elegida?: CitaCancelable;
+  } | null;
+}
+
+export interface CitaCancelable {
+  reservaId: number;
+  etiqueta: string;
+  iniciaEn: string; // ISO
+  estado: string;
+  servicio: string;
 }
 
 export function estadoInicial(): EstadoConversacion {
@@ -27,6 +86,9 @@ export function estadoInicial(): EstadoConversacion {
     faltantes: [],
     esperandoConfirmacion: false,
     ofertaCalendarPendiente: null,
+    reservaFlujo: null,
+    esperandoComprobante: null,
+    cancelarFlujo: null,
   };
 }
 
@@ -52,11 +114,30 @@ export type Accion =
       intencion: string;
       entidades: Record<string, string | number>;
       rePrompt: string;
-    };
+    }
+  // Un paciente (no admin) quiere agendar: bot.ts arranca el flujo guiado con
+  // botones (servicio -> fecha -> hora -> confirmar) en vez del bucle de texto.
+  // `entidades` trae lo que el NLU ya sacó (p. ej. el servicio), para no
+  // volver a pedirlo.
+  | { tipo: "iniciar_reserva_guiada"; entidades: Record<string, string | number> }
+  // Un paciente quiere cancelar una cita: bot.ts arranca el flujo guiado
+  // (lista sus citas -> elige -> confirma).
+  | { tipo: "iniciar_cancelar_guiado" };
 
 export interface Procesado {
   estado: EstadoConversacion;
   accion: Accion;
+}
+
+/**
+ * Texto plano de una `Accion` para responder al usuario. Las acciones que
+ * arrancan un flujo guiado o resuelven una consulta no tienen texto propio
+ * (lo produce el módulo del flujo), por eso devuelven `""` / el `rePrompt`.
+ */
+export function textoDeAccion(accion: Accion): string {
+  if (accion.tipo === "consulta_y_retomar") return accion.rePrompt;
+  if (accion.tipo === "iniciar_reserva_guiada" || accion.tipo === "iniciar_cancelar_guiado") return "";
+  return accion.texto;
 }
 
 const ETIQUETA_DATO = new Map<string, string>([
@@ -113,6 +194,9 @@ function armarDesdeIntencion(intn: IntencionNlu): EstadoConversacion {
     faltantes: [...intn.faltantes],
     esperandoConfirmacion: false,
     ofertaCalendarPendiente: null,
+    reservaFlujo: null,
+    esperandoComprobante: null,
+    cancelarFlujo: null,
   };
 }
 
@@ -304,10 +388,29 @@ function manejarIntencionNueva(cfg: Config, intn: IntencionNlu, autorizado: bool
     };
   }
 
+  // Un paciente que quiere agendar entra al flujo guiado con botones. El staff
+  // (autorizado) sigue con el bucle de texto, más rápido cuando agenda por otro.
+  if (intn.intencion === "crear_sesion" && !autorizado) {
+    return {
+      estado: estadoInicial(),
+      accion: { tipo: "iniciar_reserva_guiada", entidades: entidadesTexto(intn.entidades) },
+    };
+  }
+
+  // Un paciente que quiere cancelar o reprogramar: flujo guiado (elige de SUS
+  // citas; al confirmar una, se le ofrece "pasar a otro día"). El staff sigue
+  // con el texto ("cancela la cita 5" / "mueve la cita 5 al viernes").
+  if (
+    (intn.intencion === "cancelar_sesion" || intn.intencion === "modificar_sesion") &&
+    !autorizado
+  ) {
+    return { estado: estadoInicial(), accion: { tipo: "iniciar_cancelar_guiado" } };
+  }
+
   return siguientePaso(armarDesdeIntencion(intn));
 }
 
-/** Arranca el flujo de "quiero agendar una cita" desde un botón del menú. */
+/** Arranca el flujo de texto de "quiero agendar" (staff / canales sin botones). */
 export function iniciarAgendamiento(): Procesado {
   return siguientePaso({
     intencion: "crear_sesion",
@@ -315,6 +418,9 @@ export function iniciarAgendamiento(): Procesado {
     faltantes: ["servicio", "fecha", "hora"],
     esperandoConfirmacion: false,
     ofertaCalendarPendiente: null,
+    reservaFlujo: null,
+    esperandoComprobante: null,
+    cancelarFlujo: null,
   });
 }
 
@@ -334,6 +440,9 @@ export function pedirDatosDeRegistro(
     faltantes: camposFaltantes,
     esperandoConfirmacion: false,
     ofertaCalendarPendiente: null,
+    reservaFlujo: null,
+    esperandoComprobante: null,
+    cancelarFlujo: null,
   });
 }
 
@@ -378,4 +487,126 @@ export function resolverOfertaCalendar(
   if (!oferta) return { estado: estadoInicial(), tipo: "sin_pendiente" };
   if (respuesta === "no") return { estado: estadoInicial(), tipo: "declinado" };
   return { estado: estadoInicial(), tipo: "aceptado", reservaId: oferta.reservaId, pacienteId: oferta.pacienteId };
+}
+
+// ---------------------------------------------------------------------------
+// Flujo guiado de reserva (botones). Helpers puros; bot.ts hace la red.
+// ---------------------------------------------------------------------------
+
+function duracionTexto(min: number | undefined): string {
+  if (min === undefined || min <= 0) return "";
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  const partes = [h > 0 ? `${h} h` : "", m > 0 ? `${m} min` : ""].filter(Boolean);
+  return partes.join(" ");
+}
+
+function precioTexto(precio: number | null | undefined, moneda: string | null | undefined): string {
+  if (precio === null || precio === undefined) return "precio a consultar";
+  return `$${precio.toLocaleString("es-CO")} ${moneda ?? "COP"}`;
+}
+
+/** Etiqueta de un servicio para el mensaje ("Punción seca · 1 h · $120.000 COP"). */
+export function etiquetaServicio(s: ServicioResumen): string {
+  return [s.nombre, duracionTexto(s.duracionMin), precioTexto(s.precio, s.moneda)]
+    .filter((p) => p.length > 0)
+    .join(" · ");
+}
+
+/** Empareja el texto del NLU ("sueroterapia") con un servicio del catálogo. */
+export function emparejarServicio(servicios: ServicioResumen[], texto: string): ServicioResumen | null {
+  const t = texto.trim().toLowerCase();
+  if (t.length < 3) return null;
+  return (
+    servicios.find((s) => s.nombre.toLowerCase() === t) ??
+    servicios.find((s) => s.nombre.toLowerCase().includes(t) || t.includes(s.nombre.toLowerCase())) ??
+    null
+  );
+}
+
+const MESES = new Map<string, number>([
+  ["enero", 1], ["febrero", 2], ["marzo", 3], ["abril", 4], ["mayo", 5], ["junio", 6],
+  ["julio", 7], ["agosto", 8], ["septiembre", 9], ["setiembre", 9], ["octubre", 10],
+  ["noviembre", 11], ["diciembre", 12],
+]);
+
+function ymd(y: number, m: number, d: number): string {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Construye AAAA-MM-DD validando el rango; si no se dio año y ya pasó, usa el próximo. */
+function normalizarFecha(y: number, m: number, d: number, hoy: string, tieneAño: boolean): string | null {
+  if (!Number.isInteger(m) || !Number.isInteger(d) || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const anio = y < 100 ? y + 2000 : y;
+  const s = ymd(anio, m, d);
+  return !tieneAño && s < hoy ? ymd(anio + 1, m, d) : s;
+}
+
+const DIAS_SEMANA = new Map<string, number>([
+  ["domingo", 0], ["lunes", 1], ["martes", 2], ["miercoles", 3], ["miércoles", 3],
+  ["jueves", 4], ["viernes", 5], ["sabado", 6], ["sábado", 6],
+]);
+
+function detectarDiaSemana(t: string): { dow: number; semanaQueViene: boolean } | null {
+  const palabras = new Set(t.split(/[^a-záéíóú]+/i).filter((s) => s.length > 0));
+  for (const [nombre, dow] of DIAS_SEMANA) {
+    if (palabras.has(nombre)) {
+      return { dow, semanaQueViene: /viene|pr[oó]xim|siguiente|entrante/.test(t) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Parsea una fecha escrita por el paciente sin llamar al NLU, tolerando frases:
+ * `AAAA-MM-DD`, `D/M[/AAAA]` (o con `-`/`.`), `D de mes [de AAAA]`,
+ * "hoy" / "mañana" / "pasado mañana", y días de la semana ("el viernes",
+ * "este sábado", "el lunes que viene"). Devuelve `AAAA-MM-DD` o null.
+ */
+export function parsearFechaSimple(texto: string, hoy: string): string | null {
+  const t = texto.trim().toLowerCase();
+  const base = new Date(`${hoy}T12:00:00Z`);
+  if (Number.isNaN(base.getTime())) return null;
+
+  const desplazar = (dias: number): string => {
+    const d = new Date(base);
+    d.setUTCDate(d.getUTCDate() + dias);
+    return ymd(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+  };
+
+  const iso = /(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (iso) return normalizarFecha(Number(iso[1]), Number(iso[2]), Number(iso[3]), hoy, true);
+
+  // eslint-disable-next-line security/detect-unsafe-regex -- cuantificadores acotados; el grupo de año es opcional pero fijo
+  const dmy = /(?<!\d)(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?(?!\d)/.exec(t);
+  if (dmy) {
+    const tieneAño = dmy[3] !== undefined;
+    const y = tieneAño ? Number(dmy[3]) : base.getUTCFullYear();
+    return normalizarFecha(y, Number(dmy[2]), Number(dmy[1]), hoy, tieneAño);
+  }
+
+  // eslint-disable-next-line security/detect-unsafe-regex -- cuantificadores acotados; el grupo de año es opcional pero fijo
+  const dDeMes = /(\d{1,2})\s+de\s+([a-záéíóú]+)(?:\s+de\s+(\d{4}))?/.exec(t);
+  if (dDeMes) {
+    const m = MESES.get(dDeMes[2] ?? "");
+    if (m !== undefined) {
+      const tieneAño = dDeMes[3] !== undefined;
+      const y = tieneAño ? Number(dDeMes[3]) : base.getUTCFullYear();
+      return normalizarFecha(y, m, Number(dDeMes[1]), hoy, tieneAño);
+    }
+  }
+
+  if (/pasado\s+ma[ñn]ana/.test(t)) return desplazar(2);
+  if (/\bma[ñn]ana\b/.test(t)) return desplazar(1);
+  if (/\b(hoy|ahora)\b|cuanto antes|lo antes posible/.test(t)) return hoy;
+
+  const dia = detectarDiaSemana(t);
+  if (dia) {
+    let delta = (dia.dow - base.getUTCDay() + 7) % 7;
+    if (delta === 0) delta = 7; // "el viernes" cuando hoy es viernes = el próximo
+    if (dia.semanaQueViene) delta += 7;
+    return desplazar(delta);
+  }
+
+  return null;
 }

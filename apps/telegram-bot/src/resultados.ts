@@ -32,12 +32,49 @@ interface ServicioConTarifa {
   moneda?: string | null;
 }
 
-/** "2026-09-05T15:00:00-05:00" -> "05/09 15:00". Sin librería de fechas: el formato ya viene fijo en offset -05:00. */
+const TZ_BOGOTA = "America/Bogota";
+
+/** ISO (con o sin offset, o UTC "Z") -> "05/09 15:00" en hora de Bogotá. */
 function fechaCorta(iso: string | undefined): string {
-  if (typeof iso !== "string" || iso.length < 16) return iso ?? "";
-  const [fecha, hora] = [iso.slice(0, 10), iso.slice(11, 16)];
-  const [, mes, dia] = fecha.split("-");
-  return `${dia ?? "?"}/${mes ?? "?"}${hora ? " " + hora : ""}`;
+  if (typeof iso !== "string") return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const partes = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ_BOGOTA,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const p = (t: string): string => partes.find((x) => x.type === t)?.value ?? "";
+  return `${p("day")}/${p("month")} ${p("hour")}:${p("minute")}`;
+}
+
+/** ISO -> "15:00" en hora de Bogotá. Para los botones de horario. */
+export function horaCorta(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return new Intl.DateTimeFormat("es-CO", {
+    timeZone: TZ_BOGOTA,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+/** "2026-11-21" -> "sábado 21 de noviembre de 2026". */
+export function fechaLarga(fecha: string): string {
+  const d = new Date(`${fecha}T12:00:00-05:00`);
+  if (Number.isNaN(d.getTime())) return fecha;
+  return new Intl.DateTimeFormat("es-CO", {
+    timeZone: TZ_BOGOTA,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(d);
 }
 
 function listaOVacio<T>(items: T[] | undefined, aTexto: (item: T) => string, vacio: string): string {
@@ -69,7 +106,7 @@ function formatearExito(intencion: string, datos: unknown): string {
     }
 
     case "crear_sesion":
-      return `Cita creada. Número de reserva: ${campoTexto(d["reservaId"], "?")}.`;
+      return `¡Su cita quedó agendada! Número de reserva: ${campoTexto(d["reservaId"], "?")}. Recuerde el pago anticipado para confirmarla.`;
 
     case "modificar_sesion":
       return `Cita reprogramada. Nuevo número de reserva: ${campoTexto(d["reservaId"], "?")}.`;
@@ -86,7 +123,7 @@ function formatearExito(intencion: string, datos: unknown): string {
         citas,
         (c) =>
           `${fechaCorta(c.iniciaEn)} — ${c.paciente ?? "sin paciente"} · ${c.servicio ?? "sin servicio"} (${c.estado ?? "?"})`,
-        "No hay citas en ese rango.",
+        "No tiene citas programadas.",
       );
     }
 

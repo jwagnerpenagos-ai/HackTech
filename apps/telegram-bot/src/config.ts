@@ -28,11 +28,17 @@ const EnvSchema = z
     BOT_NLU_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(8_000),
 
     // n8n recibe la intención ya confirmada y la reenvía a core-api
-    // (POST /comandos): "n8n envía la intención; el modelo nunca". El bot
-    // nunca le habla a core-api directamente.
+    // (POST /comandos): "n8n envía la intención; el modelo nunca".
     N8N_URL: z.string().url().default("http://127.0.0.1:5678"),
     N8N_COMANDOS_PATH: z.string().min(1).default("/webhook/comandos"),
     BOT_N8N_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(15_000),
+
+    // Excepción a "el bot no habla con core-api": las operaciones de pago
+    // (reportar comprobante, /pagos del staff) NO son intenciones del
+    // modelo, son operaciones internas. Van directo a core-api con la
+    // misma X-Internal-Key. Ver services/core-api/src/server.ts (/pagos/*).
+    CORE_API_URL: z.string().url().default("http://127.0.0.1:8000"),
+    BOT_CORE_API_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(15_000),
 
     // Fase 3 (opcional): tras reservar, el bot le ofrece al paciente un
     // link para sincronizar con SU Google Calendar personal. El bot nunca

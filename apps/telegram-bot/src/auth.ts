@@ -23,10 +23,13 @@ export function esAutorizado(cfg: Config, chatId: number | undefined): boolean {
   return nivelDeAcceso(cfg, chatId) === "autorizado";
 }
 
-/** Intenciones administrativas: solo un chat autorizado (Lina/staff) puede ejecutarlas. */
+/**
+ * Intenciones administrativas: solo un chat autorizado (Lina/staff) puede
+ * ejecutarlas. `cancelar_sesion` y `modificar_sesion` NO están: un paciente
+ * puede cancelar o reprogramar SU cita desde el flujo guiado (el candado real
+ * es el chequeo de propiedad en core-api).
+ */
 export const INTENCIONES_RESTRINGIDAS = new Set<string>([
-  "modificar_sesion",
-  "cancelar_sesion",
   "buscar_cliente",
   "enviar_correo",
   "crear_carpeta",

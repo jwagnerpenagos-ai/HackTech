@@ -19,14 +19,18 @@ function main(): void {
     });
   }
 
-  // Menú nativo de comandos de Telegram (el botón "/" del cliente).
+  // Menú nativo de Telegram (botón "/"). Solo lo que le sirve al paciente;
+  // /id y /ping siguen funcionando pero no se listan.
   void bot.api
     .setMyCommands([
-      { command: "start", description: "Presentación y menú" },
-      { command: "help", description: "Ayuda y ejemplos" },
-      { command: "cancelar", description: "Cancelar la acción en curso" },
-      { command: "id", description: "Ver mi chat_id" },
-      { command: "ping", description: "Probar que el bot responde" },
+      { command: "start", description: "Menú principal" },
+      { command: "agendar", description: "Pedir una cita" },
+      { command: "miscitas", description: "Ver mis citas" },
+      { command: "cancelarcita", description: "Cancelar una cita" },
+      { command: "servicios", description: "Servicios y precios" },
+      { command: "info", description: "Información del consultorio" },
+      { command: "cancelar", description: "Cancelar lo que estemos haciendo" },
+      { command: "ayuda", description: "Cómo funciona" },
     ])
     .catch((err: unknown) => {
       logger.warn(

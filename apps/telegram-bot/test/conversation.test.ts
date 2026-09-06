@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { loadConfig } from "../src/config.js";
 import {
+  emparejarServicio,
   estadoInicial,
   iniciarAgendamiento,
   pareceValorDirecto,
+  parsearFechaSimple,
   procesarTexto,
   resolverConfirmacion,
   resolverOfertaCalendar,
@@ -15,7 +17,9 @@ const cfg = loadConfig();
 
 /** Texto visible de una acción, sea cual sea su variante. */
 function textoDe(accion: Accion): string {
-  return accion.tipo === "consulta_y_retomar" ? accion.rePrompt : accion.texto;
+  if (accion.tipo === "consulta_y_retomar") return accion.rePrompt;
+  if (accion.tipo === "iniciar_reserva_guiada" || accion.tipo === "iniciar_cancelar_guiado") return "";
+  return accion.texto;
 }
 
 function nluFijo(r: ResultadoNlu): () => Promise<ResultadoNlu> {
@@ -71,6 +75,9 @@ describe("procesarTexto", () => {
       faltantes: ["servicio", "fecha"],
       esperandoConfirmacion: false,
       ofertaCalendarPendiente: null,
+      reservaFlujo: null,
+      esperandoComprobante: null,
+      cancelarFlujo: null,
     };
     const r = await procesarTexto(cfg, previo, "rehabilitación", nluFijo(ok("desconocida")));
     expect(r.estado.entidades["servicio"]).toBe("rehabilitación");
@@ -167,6 +174,9 @@ describe("procesarTexto en medio de un flujo de datos", () => {
     faltantes: ["servicio", "fecha", "hora"],
     esperandoConfirmacion: false,
     ofertaCalendarPendiente: null,
+      reservaFlujo: null,
+      esperandoComprobante: null,
+      cancelarFlujo: null,
   });
 
   it("un valor corto llena el dato sin reinterpretar", async () => {
@@ -233,6 +243,49 @@ describe("procesarTexto en medio de un flujo de datos", () => {
   });
 });
 
+describe("parsearFechaSimple", () => {
+  const hoy = "2026-09-05"; // sábado
+
+  it("acepta AAAA-MM-DD, D/M/AAAA y D-M.AAAA, dentro de una frase", () => {
+    expect(parsearFechaSimple("2026-11-18", hoy)).toBe("2026-11-18");
+    expect(parsearFechaSimple("el 18/11/2026", hoy)).toBe("2026-11-18");
+    expect(parsearFechaSimple("puede ser el 18-11-2026?", hoy)).toBe("2026-11-18");
+  });
+  it("sin año, si la fecha ya pasó asume el próximo año", () => {
+    expect(parsearFechaSimple("18/11", hoy)).toBe("2026-11-18");
+    expect(parsearFechaSimple("dale, 3/1", hoy)).toBe("2027-01-03");
+  });
+  it("entiende frases informales con hoy / mañana / pasado mañana", () => {
+    expect(parsearFechaSimple("hoy mismo si se puede", hoy)).toBe("2026-09-05");
+    expect(parsearFechaSimple("puede ser mañana?", hoy)).toBe("2026-09-06");
+    expect(parsearFechaSimple("mejor pasado mañana", hoy)).toBe("2026-09-07");
+    expect(parsearFechaSimple("me sirve el 3 de diciembre", hoy)).toBe("2026-12-03");
+  });
+  it("resuelve días de la semana (próxima ocurrencia)", () => {
+    // hoy es sábado 2026-09-05
+    expect(parsearFechaSimple("el lunes", hoy)).toBe("2026-09-07");
+    expect(parsearFechaSimple("este viernes", hoy)).toBe("2026-09-11");
+    expect(parsearFechaSimple("el sábado", hoy)).toBe("2026-09-12"); // el próximo, no hoy
+    expect(parsearFechaSimple("el lunes que viene", hoy)).toBe("2026-09-14");
+  });
+  it("devuelve null para lo que no reconoce", () => {
+    expect(parsearFechaSimple("cuando puedas", hoy)).toBeNull();
+    expect(parsearFechaSimple("el 40 de marzo", hoy)).toBeNull();
+  });
+});
+
+describe("emparejarServicio", () => {
+  const servicios = [{ nombre: "Punción seca" }, { nombre: "Terapia neural" }, { nombre: "Sueroterapia" }];
+  it("empareja por nombre exacto o parcial, sin distinguir mayúsculas", () => {
+    expect(emparejarServicio(servicios, "sueroterapia")?.nombre).toBe("Sueroterapia");
+    expect(emparejarServicio(servicios, "punción")?.nombre).toBe("Punción seca");
+  });
+  it("no empareja texto muy corto o ajeno", () => {
+    expect(emparejarServicio(servicios, "xy")).toBeNull();
+    expect(emparejarServicio(servicios, "masaje relajante")).toBeNull();
+  });
+});
+
 describe("iniciarAgendamiento", () => {
   it("arranca el flujo de crear_sesion pidiendo el servicio", () => {
     const r = iniciarAgendamiento();
@@ -250,6 +303,9 @@ describe("resolverConfirmacion", () => {
     faltantes: [],
     esperandoConfirmacion: true,
     ofertaCalendarPendiente: null,
+      reservaFlujo: null,
+      esperandoComprobante: null,
+      cancelarFlujo: null,
   };
 
   it("'si' -> ejecutar", () => {

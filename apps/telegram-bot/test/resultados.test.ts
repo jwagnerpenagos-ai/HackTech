@@ -31,7 +31,7 @@ describe("formatearResultado", () => {
 
   it("consultar_agenda sin citas avisa que no hay nada", () => {
     const r: ResultadoEjecucion = { tipo: "ok", datos: { citas: [] } };
-    expect(formatearResultado("consultar_agenda", r)).toBe("No hay citas en ese rango.");
+    expect(formatearResultado("consultar_agenda", r)).toBe("No tiene citas programadas.");
   });
 
   it("buscar_cliente sin candidatos avisa que no encontró a nadie", () => {
