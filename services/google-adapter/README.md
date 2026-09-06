@@ -29,28 +29,43 @@ incluido n8n, habla con Google directamente.
 ## Setup: credenciales de Google
 
 Esto **no se puede automatizar del todo**: Google exige que una persona
-autorice explícitamente en el navegador.
+autorice explícitamente en el navegador. Para la demo del hackathon la
+cuenta que opera el bot es **la de José** (`jwagnerpenagos@gmail.com`); en
+producción sería la de Lina/Workspace — el procedimiento es el mismo.
 
 1. En [Google Cloud Console](https://console.cloud.google.com/), un proyecto
-   con la **Gmail API** y la **Google Calendar API** habilitadas.
+   con estas **APIs habilitadas**: Gmail API, Google Calendar API, Google
+   Drive API y Google Sheets API. (Drive/Sheets son para la capa 2 de pagos,
+   todavía no construida — se habilitan ya para no repetir el consentimiento.)
 2. **Credenciales → Crear credenciales → ID de cliente OAuth**, tipo
    "Aplicación web". Como URI de redirección autorizado, poné exactamente
    `GOOGLE_REDIRECT_URI` (por defecto `http://localhost:8200/oauth/callback`).
 3. Copiá `.env.example` a `.env.local` y completá `GOOGLE_CLIENT_ID` /
    `GOOGLE_CLIENT_SECRET` con lo del paso anterior.
-4. **Pantalla de consentimiento OAuth**: mientras la app esté en modo
-   "Testing" (lo normal para un hackathon — verificarla toma días/semanas),
-   agregá como "test user" la cuenta de Gmail de Lina, y cualquier otra
-   cuenta con la que se vaya a probar el Calendar personal del paciente
-   (fase 3). Sin esto, Google rechaza el login con un error de app no
-   verificada.
+4. **Pantalla de consentimiento OAuth** (tipo "External", modo "Testing"):
+   - Como *scopes* se piden 4: `gmail.send`, `calendar.events`, `drive.file`,
+     `spreadsheets` (los declara `src/setupOauth.ts`).
+   - Agregá como **test user** la cuenta que va a operar el bot (la de José),
+     y cualquier otra con la que se pruebe el Calendar personal del paciente
+     (fase 3). Sin esto Google rechaza el login como "app no verificada".
+   - Ojo: con una cuenta **`@gmail.com` normal** en modo Testing, el refresh
+     token **caduca a los 7 días**. Para la demo alcanza (se vuelve a correr
+     `setup-oauth`); para algo estable hay que "Publicar" la app o usar una
+     cuenta de Workspace.
 5. `npm run setup-oauth` — abre un enlace, iniciá sesión **con la cuenta de
-   Lina**, autorizá, y el script imprime el `GOOGLE_REFRESH_TOKEN` para
-   pegar en `.env.local`. Es un paso único; de ahí en más `googleapis`
-   renueva el access token solo.
-6. `npm run dev`. Si falta cualquiera de las tres variables de Google, el
+   la demo**, autorizá los 4 permisos, y el script imprime el
+   `GOOGLE_REFRESH_TOKEN` para pegar en `.env.local`.
+6. `npm run dev`. Si falta cualquiera de las tres variables de Google
+   (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN`), el
    proceso igual levanta (sirve `/health`) pero el consumidor del outbox
    queda apagado con un warning en el log.
+7. **Calendarios por sede**: cada sede usa su propio calendario
+   (`catalogo.sede.google_calendar_id`, hoy vacío en el seed). Creá dos
+   calendarios en la cuenta de la demo ("La Fisioterapeuta Li — Tunja" y
+   "— Turmequé"), copiá sus IDs (Configuración del calendario → "ID de
+   calendario") y cargalos en la columna. Sin esto, los eventos `calendar`
+   del outbox se marcan completados pero no crean nada (comportamiento
+   esperado, no error).
 
 ## Desarrollo local
 

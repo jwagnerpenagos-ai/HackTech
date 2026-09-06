@@ -4,17 +4,26 @@ import { google } from "googleapis";
 import { loadConfig } from "./config.js";
 
 /**
- * `npm run setup-oauth` — obtiene UNA vez el refresh token de la cuenta de
- * Google de Lina (Workspace). Necesario porque el consumidor del outbox
- * corre sin nadie presente para hacer login: se autoriza una sola vez acá,
- * el refresh token queda en `.env.local` (`GOOGLE_REFRESH_TOKEN`) y
- * `googleapis` renueva el access token solo de ahí en adelante.
+ * `npm run setup-oauth` — obtiene UNA vez el refresh token de la cuenta que
+ * opera el bot (para la demo del hackathon, la de José; en producción, la de
+ * Lina/Workspace). Necesario porque el consumidor del outbox corre sin nadie
+ * presente para hacer login: se autoriza una sola vez acá, el refresh token
+ * queda en `.env.local` (`GOOGLE_REFRESH_TOKEN`) y `googleapis` renueva el
+ * access token solo de ahí en adelante.
  *
  * No se puede automatizar más allá de esto: Google exige el consentimiento
  * explícito de una persona en el navegador.
  */
 
-const SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/calendar.events"];
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.send", // correo de confirmación
+  "https://www.googleapis.com/auth/calendar.events", // espejo del Calendar de cada sede
+  // Capa 2 de pagos (todavía no construida): guardar el comprobante en Drive y
+  // anotar la cita en un Sheet. Se piden ya para no volver a pasar por la
+  // pantalla de consentimiento. `drive.file` = solo los archivos que crea la app.
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/spreadsheets",
+];
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -32,7 +41,7 @@ async function main(): Promise<void> {
     scope: SCOPES,
   });
 
-  console.log("\n1. Inicie sesión con LA CUENTA DE GOOGLE DE LINA y abra este enlace:\n");
+  console.log("\n1. Inicie sesión con LA CUENTA que va a operar el bot (la de la demo) y abra este enlace:\n");
   console.log(authUrl);
   console.log(`\n2. Esperando el redirect en ${cfg.GOOGLE_REDIRECT_URI} …\n`);
 
