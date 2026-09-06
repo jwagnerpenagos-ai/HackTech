@@ -42,6 +42,7 @@ function tieneCodigo(err: unknown): err is { code: unknown; message?: unknown } 
 }
 
 export function normalizarErrorDb(err: unknown): ErrorDominio {
+  if (err instanceof ErrorDominio) return err; // ya normalizado: pasa tal cual
   if (tieneCodigo(err)) {
     const codigoSql = typeof err.code === "string" ? err.code : "";
     const mensaje = typeof err.message === "string" ? err.message : "Error de base de datos.";

@@ -86,21 +86,37 @@ describe("dominio/agenda", () => {
     expect(resultado).toEqual({ estado: "cancelada_a_tiempo" });
   });
 
-  it("modificarSesion lee la reserva actual, cancela y crea una nueva dentro de una transacción", async () => {
+  it("modificarSesion sin compra: cancela y crea una nueva en una transacción", async () => {
     const { db, llamadas } = crearDbFalsa([
-      [{ paciente_id: 5, servicio_id: 3, sede_id: 1 }], // SELECT reserva actual
+      [{ paciente_id: 5, servicio_id: 3, sede_id: 1, estado: "pendiente_pago", compra_id: null }],
       [{ estado: "cancelada_a_tiempo" }], // cancelar_reserva
       [{ crear_reserva: 88 }], // crear_reserva
     ]);
-
-    const resultado = await agenda.modificarSesion(db, {
+    const r = await agenda.modificarSesion(db, {
       reservaId: 9,
       nuevaIniciaEnIso: "2026-09-06T10:00:00-05:00",
-      motivo: "Reprogramada desde el bot",
+      motivo: "x",
     });
-
-    expect(resultado).toEqual({ reservaId: 88 });
+    expect(r).toEqual({ reservaId: 88, estado: "pendiente_pago", compraId: null, montoTotal: null });
     expect(llamadas).toHaveLength(3);
+  });
+
+  it("modificarSesion de una cita PAGADA: mueve la compra y la nueva nace confirmada", async () => {
+    const { db } = crearDbFalsa([
+      [{ paciente_id: 5, servicio_id: 3, sede_id: 1, estado: "confirmada", compra_id: 20 }],
+      [{ estado: "cancelada_a_tiempo" }], // cancelar_reserva
+      [{ crear_reserva: 88 }], // crear_reserva
+      [], // UPDATE participante viejo -> compra_id NULL
+      [], // UPDATE participante nuevo -> compra_id 20
+      [], // UPDATE reserva nueva -> confirmada
+      [{ valor_total: "150000.00" }], // SELECT valor_total
+    ]);
+    const r = await agenda.modificarSesion(db, {
+      reservaId: 9,
+      nuevaIniciaEnIso: "2026-09-06T10:00:00-05:00",
+      motivo: "x",
+    });
+    expect(r).toEqual({ reservaId: 88, estado: "confirmada", compraId: 20, montoTotal: 150000 });
   });
 
   it("modificarSesion lanza no_encontrado si la reserva no existe", async () => {

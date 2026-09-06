@@ -105,6 +105,32 @@ export async function listarServicios(db: Db): Promise<ServicioConTarifa[]> {
   }));
 }
 
+export interface TarifaIndividual {
+  id: number;
+  nombre: string;
+  valorTotal: number;
+  moneda: string;
+}
+
+/** Tarifa de UNA sesión individual (cupo 1) vigente para un servicio. Es la que cobra el bot. */
+export async function resolverTarifaIndividual(
+  db: Db,
+  servicioId: number,
+): Promise<TarifaIndividual | null> {
+  const r = await db.query<{ id: number; nombre: string; valor_total: string; moneda: string }>(
+    `SELECT id, nombre, valor_total, moneda
+       FROM catalogo.tarifa
+      WHERE servicio_id = $1 AND sesiones_incluidas = 1 AND cupo_personas = 1
+        AND activo AND vigencia @> CURRENT_DATE
+      ORDER BY id
+      LIMIT 1`,
+    [servicioId],
+  );
+  const f = r.rows[0];
+  if (!f) return null;
+  return { id: f.id, nombre: f.nombre, valorTotal: Number(f.valor_total), moneda: f.moneda };
+}
+
 /** El único profesional activo, cuando la intención no especifica cuál. */
 export async function profesionalPorDefecto(db: Db): Promise<number | null> {
   const r = await db.query<{ id: number }>(

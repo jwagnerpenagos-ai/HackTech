@@ -20,7 +20,8 @@ import * as integraciones from "./dominio/integraciones.js";
 const REQUISITOS: Record<IntencionEjecutable, readonly (keyof Entidades)[]> = {
   consultar_catalogo: [],
   consultar_agenda: [],
-  consultar_disponibilidad: ["servicio", "sede", "fecha"],
+  // sin fecha: el bot pide los "próximos horarios" (varios días); con fecha: ese día.
+  consultar_disponibilidad: ["servicio"],
   // "cliente" no está aquí a propósito: para un chat de Telegram identificado
   // se resuelve solo (ver el case); solo hace falta si el paciente es
   // desconocido o el canal no tiene identidad de chat (ver más abajo).
@@ -50,6 +51,9 @@ function sedePorFecha(fecha: string): string | null {
   const dia = d.getUTCDay(); // 0 = domingo … 6 = sábado
   return dia === 0 || dia === 6 ? "Turmequé" : "Tunja";
 }
+
+/** El paciente nuevo solo puede reservar esto; el resto exige haber tenido ya una. */
+const RE_VALORACION_INICIAL = /valoraci[oó]n\s+inicial/i;
 
 /** Etiqueta en español para los campos que el usuario podría tener que aportar. */
 const ETIQUETA_CAMPO = new Map<string, string>([
@@ -84,9 +88,25 @@ function aTimestamptzBogota(fecha: string, hora: string): string {
   return `${fecha}T${hora}:00-05:00`;
 }
 
+/** Fecha de hoy (AAAA-MM-DD) en la zona de Bogotá. */
+function hoyBogota(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 function sieteDiasDespuesIso(desdeIso: string): string {
   const fecha = new Date(desdeIso);
   fecha.setUTCDate(fecha.getUTCDate() + 7);
+  return fecha.toISOString();
+}
+
+function unAñoDespuesIso(desdeIso: string): string {
+  const fecha = new Date(desdeIso);
+  fecha.setUTCFullYear(fecha.getUTCFullYear() + 1);
   return fecha.toISOString();
 }
 
@@ -145,21 +165,36 @@ export async function ejecutarComando(
     switch (intencion) {
       case "consultar_catalogo": {
         const servicios = await catalogo.listarServicios(db);
-        return { ok: true, datos: { servicios } };
+        // `registrado` le dice al bot si este chat ya es paciente: si no lo es,
+        // solo puede reservar la valoración inicial (se filtra del lado del bot).
+        // La lista SIEMPRE va completa: es información, no una restricción.
+        const chatId = Number(ctx.creadoPor);
+        let registrado = true;
+        if (ctx.esAdmin !== true && Number.isSafeInteger(chatId)) {
+          const identidad = await pacientes.resolverPorChatId(db, chatId);
+          registrado = identidad.tipo === "conocido";
+        }
+        return { ok: true, datos: { servicios, registrado } };
       }
 
       case "consultar_agenda": {
+        const chatId = Number(ctx.creadoPor);
+        const esAdminOAnonimo = ctx.esAdmin === true || !Number.isSafeInteger(chatId);
+
         const desdeIso = entidades.fecha ? `${entidades.fecha}T00:00:00-05:00` : new Date().toISOString();
+        // Con fecha: ese día. Sin fecha: para admin, la semana ("qué hay esta
+        // semana"); para el paciente, TODAS sus citas próximas ("mis citas"),
+        // no solo las de 7 días.
         const hastaIso = entidades.fecha
           ? `${entidades.fecha}T23:59:59-05:00`
-          : sieteDiasDespuesIso(desdeIso);
+          : esAdminOAnonimo
+            ? sieteDiasDespuesIso(desdeIso)
+            : unAñoDespuesIso(desdeIso);
 
-        // Admin (Lina/staff): agenda completa, igual que siempre. Cualquier
-        // otro chat ve solo la suya, resuelta por personas.vinculo_telegram.
-        // Un canal sin chat_id numérico (web, pruebas) se trata como admin:
-        // no hay identidad de paciente que filtrar.
-        const chatId = Number(ctx.creadoPor);
-        if (ctx.esAdmin === true || !Number.isSafeInteger(chatId)) {
+        // Admin (Lina/staff): agenda completa. Cualquier otro chat ve solo la
+        // suya, resuelta por personas.vinculo_telegram. Un canal sin chat_id
+        // numérico (web, pruebas) se trata como admin: no hay identidad que filtrar.
+        if (esAdminOAnonimo) {
           const citas = await agenda.consultarAgenda(db, {
             desdeIso,
             hastaIso,
@@ -182,20 +217,38 @@ export async function ejecutarComando(
 
       case "consultar_disponibilidad": {
         const nombreServicio = exigir(entidades.servicio, "servicio");
-        const nombreSede = exigir(entidades.sede, "sede");
-        const fecha = exigir(entidades.fecha, "fecha");
-
         const servicio = await catalogo.resolverServicio(db, nombreServicio);
         if (!servicio) return errorComando("no_encontrado", "No se encontró ese servicio.", 404);
-        const sede = await catalogo.resolverSede(db, nombreSede);
-        if (!sede) return errorComando("no_encontrado", "No se encontró esa sede.", 404);
 
-        const slots = await agenda.consultarDisponibilidad(db, {
+        // Sin fecha: las N próximas disponibles en orden (no todo el calendario).
+        if (entidades.fecha === undefined || entidades.fecha === null) {
+          const tunja = await catalogo.resolverSede(db, "Tunja");
+          const turmeque = await catalogo.resolverSede(db, "Turmequé");
+          if (!tunja || !turmeque) return errorComando("no_encontrado", "No se encontraron las sedes.", 404);
+          const slots = await agenda.proximosSlots(db, {
+            servicioId: servicio.id,
+            desdeFecha: hoyBogota(),
+            limite: 6,
+            horizonteDias: 21,
+            sedes: { tunja: tunja.id, turmeque: turmeque.id },
+          });
+          return { ok: true, datos: { servicio: servicio.nombre, modo: "proximos", slots } };
+        }
+
+        // Con fecha: ese día. La sede ya vino derivada de la fecha (ver la
+        // normalización al inicio de ejecutarComando).
+        const fecha = entidades.fecha;
+        const sede = await catalogo.resolverSede(db, exigir(entidades.sede, "sede"));
+        if (!sede) return errorComando("no_encontrado", "No se encontró esa sede.", 404);
+        const todos = await agenda.consultarDisponibilidad(db, {
           servicioId: servicio.id,
           sedeId: sede.id,
           fecha,
         });
-        return { ok: true, datos: { servicio: servicio.nombre, sede: sede.nombre, slots } };
+        // Se descarta lo que caiga a menos de 24 h (no se puede reservar igual).
+        const limite24h = Date.now() + 24 * 60 * 60 * 1000;
+        const slots = todos.filter((s) => new Date(s.inicio).getTime() >= limite24h);
+        return { ok: true, datos: { servicio: servicio.nombre, sede: sede.nombre, modo: "dia", slots } };
       }
 
       case "crear_sesion": {
@@ -203,6 +256,24 @@ export async function ejecutarComando(
         const nombreSede = exigir(entidades.sede, "sede");
         const fecha = exigir(entidades.fecha, "fecha");
         const hora = exigir(entidades.hora, "hora");
+
+        const servicio = await catalogo.resolverServicio(db, nombreServicio);
+        if (!servicio) return errorComando("no_encontrado", "No se encontró ese servicio.", 404);
+
+        const iniciaEnIso = aTimestamptzBogota(fecha, hora);
+        const horasDeAnticipacion = (new Date(iniciaEnIso).getTime() - Date.now()) / 3_600_000;
+        if (horasDeAnticipacion < 24) {
+          return errorComando(
+            "anticipacion_insuficiente",
+            "Las citas se reservan con al menos 24 horas de anticipación. Para algo más pronto, escríbanos al 311 398 1422.",
+            422,
+          );
+        }
+
+        const tarifa = await catalogo.resolverTarifaIndividual(db, servicio.id);
+        if (!tarifa) {
+          return errorComando("no_encontrado", "Ese servicio no tiene una tarifa configurada.", 404);
+        }
 
         // Un chat de Telegram no-admin se identifica solo (o se registra si
         // es su primera cita). Admin y canales sin chat_id numérico (web,
@@ -217,6 +288,14 @@ export async function ejecutarComando(
           if (identidad.tipo === "conocido") {
             paciente = identidad.paciente;
           } else {
+            // Chat sin paciente vinculado = primera cita: solo la valoración inicial.
+            if (!RE_VALORACION_INICIAL.test(servicio.nombre)) {
+              return errorComando(
+                "valoracion_requerida",
+                "Para su primera cita agendamos una Valoración inicial. Después de esa consulta podrá reservar los demás servicios.",
+                422,
+              );
+            }
             const faltanRegistro = (["cliente", "telefono"] as const).filter(
               (campo) => entidades[campo] === undefined || entidades[campo] === null,
             );
@@ -258,8 +337,6 @@ export async function ejecutarComando(
           paciente = resultadoPaciente.paciente;
         }
 
-        const servicio = await catalogo.resolverServicio(db, nombreServicio);
-        if (!servicio) return errorComando("no_encontrado", "No se encontró ese servicio.", 404);
         const sede = await catalogo.resolverSede(db, nombreSede);
         if (!sede) return errorComando("no_encontrado", "No se encontró esa sede.", 404);
 
@@ -267,8 +344,9 @@ export async function ejecutarComando(
           pacienteId: paciente.id,
           servicioId: servicio.id,
           sedeId: sede.id,
-          iniciaEnIso: aTimestamptzBogota(fecha, hora),
+          iniciaEnIso,
           creadoPor: ctx.creadoPor ?? null,
+          tarifa,
         });
 
         // Confirmación por correo: obligatoria cuando el paciente tiene
@@ -297,10 +375,29 @@ export async function ejecutarComando(
         const fecha = exigir(entidades.fecha, "fecha");
         const hora = exigir(entidades.hora, "hora");
 
+        // Un chat de paciente solo puede reprogramar SUS citas.
+        const chatId = Number(ctx.creadoPor);
+        if (ctx.esAdmin !== true && Number.isSafeInteger(chatId)) {
+          const identidad = await pacientes.resolverPorChatId(db, chatId);
+          const suya =
+            identidad.tipo === "conocido" &&
+            (await agenda.reservaEsDelPaciente(db, sesionId, identidad.paciente.id));
+          if (!suya) return errorComando("no_autorizado", "Esa cita no está a su nombre.", 403);
+        }
+
+        const nuevaIso = aTimestamptzBogota(fecha, hora);
+        if ((new Date(nuevaIso).getTime() - Date.now()) / 3_600_000 < 24) {
+          return errorComando(
+            "anticipacion_insuficiente",
+            "El nuevo horario debe ser con al menos 24 horas de anticipación.",
+            422,
+          );
+        }
+
         const resultado = await agenda.modificarSesion(db, {
           reservaId: sesionId,
-          nuevaIniciaEnIso: aTimestamptzBogota(fecha, hora),
-          motivo: "Reprogramada desde el bot",
+          nuevaIniciaEnIso: nuevaIso,
+          motivo: "Reprogramada por el paciente desde el bot",
           por: ctx.creadoPor ?? null,
         });
         return { ok: true, datos: resultado };
@@ -308,9 +405,23 @@ export async function ejecutarComando(
 
       case "cancelar_sesion": {
         const sesionId = exigir(entidades.sesion_id, "sesion_id");
+
+        // Un chat de paciente solo puede cancelar SUS citas. Admin y canales
+        // sin chat_id numérico (web, pruebas) cancelan cualquiera.
+        const chatId = Number(ctx.creadoPor);
+        if (ctx.esAdmin !== true && Number.isSafeInteger(chatId)) {
+          const identidad = await pacientes.resolverPorChatId(db, chatId);
+          const suya =
+            identidad.tipo === "conocido" &&
+            (await agenda.reservaEsDelPaciente(db, sesionId, identidad.paciente.id));
+          if (!suya) {
+            return errorComando("no_autorizado", "Esa cita no está a su nombre.", 403);
+          }
+        }
+
         const resultado = await agenda.cancelarSesion(db, {
           reservaId: sesionId,
-          motivo: entidades.texto ?? "Cancelada desde el bot",
+          motivo: entidades.texto ?? "Cancelada por el paciente desde el bot",
           por: ctx.creadoPor ?? null,
         });
         return { ok: true, datos: resultado };

@@ -1,11 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
-import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyReply } from "fastify";
 import rateLimit from "@fastify/rate-limit";
+import { z } from "zod";
 import { loadConfig, type Config } from "./config.js";
 import { opcionesLog } from "./logger.js";
 import { construirDb, type Db } from "./db.js";
 import { ComandoSchema } from "./contract/comando.js";
 import { ejecutarComando } from "./comandos.js";
+import { ErrorDominio } from "./errores.js";
+import * as pagos from "./dominio/pagos.js";
 
 /** Comparación de tiempo constante entre el header y el secreto esperado. */
 function claveValida(recibida: string | undefined, esperada: string): boolean {
@@ -84,6 +87,66 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
       });
     }
     return reply.code(200).send({ ok: true, datos: resultado.datos });
+  });
+
+  // --- Pagos anticipados de citas del bot (ver dominio/pagos.ts) ---
+  // Fuera de /comandos a propósito: no son intenciones interpretadas por el
+  // modelo, son operaciones internas (reporte de comprobante + verificación
+  // por el staff). El guard sigue siendo X-Internal-Key.
+  const RegistrarPagoBody = z.object({
+    compra_id: z.coerce.number().int().positive(),
+    valor: z.coerce.number().positive(),
+    referencia: z.string().max(200).nullish(),
+    comprobante_ref: z.string().max(300).nullish(),
+    creado_por: z.string().max(120).nullish(),
+  });
+  const PagoIdBody = z.object({
+    pago_id: z.coerce.number().int().positive(),
+    por: z.string().max(120).nullish(),
+    motivo: z.string().max(300).nullish(),
+  });
+
+  async function conDominio(reply: FastifyReply, fn: () => Promise<unknown>): Promise<unknown> {
+    try {
+      return { ok: true, datos: await fn() };
+    } catch (err) {
+      if (err instanceof ErrorDominio) {
+        return reply.code(err.status).send({ ok: false, error: err.codigo, mensaje: err.message });
+      }
+      throw err;
+    }
+  }
+
+  app.post("/pagos", async (req, reply) => {
+    const b = RegistrarPagoBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () =>
+      pagos.registrarPago(db, {
+        compraId: b.data.compra_id,
+        valor: b.data.valor,
+        referencia: b.data.referencia ?? null,
+        comprobanteRef: b.data.comprobante_ref ?? null,
+        creadoPor: b.data.creado_por ?? null,
+      }),
+    );
+  });
+
+  app.get("/pagos/pendientes", async (_req, reply) =>
+    conDominio(reply, async () => ({ pagos: await pagos.listarPagosPendientes(db) })),
+  );
+
+  app.post("/pagos/verificar", async (req, reply) => {
+    const b = PagoIdBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () => pagos.verificarPago(db, { pagoId: b.data.pago_id, por: b.data.por ?? null }));
+  });
+
+  app.post("/pagos/rechazar", async (req, reply) => {
+    const b = PagoIdBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () =>
+      pagos.rechazarPago(db, { pagoId: b.data.pago_id, por: b.data.por ?? null, motivo: b.data.motivo ?? null }),
+    );
   });
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
