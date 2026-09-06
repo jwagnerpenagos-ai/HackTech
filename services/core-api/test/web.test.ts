@@ -3,6 +3,16 @@ import { crearDbFalsa } from "./fakeDb.js";
 import { codigoDeSlug, slugDeCodigo } from "../src/web/slugs.js";
 import { firmarToken, verificarToken } from "../src/web/token.js";
 import { listarServiciosWeb, disponibilidadWeb, crearReservaWeb } from "../src/web/publico.js";
+import { firmaIntegridad, type Wompi } from "../src/web/wompi.js";
+
+const WOMPI_OFF: Wompi = {
+  habilitado: false,
+  publicKey: "",
+  integritySecret: "",
+  apiBase: "https://sandbox.wompi.co/v1",
+  checkoutBase: "https://checkout.wompi.co/p/",
+  redirectBase: "http://localhost:3000/reservar/resultado",
+};
 
 describe("web/slugs", () => {
   it("traduce slug <-> codigo en ambos sentidos", () => {
@@ -62,12 +72,24 @@ describe("web/publico", () => {
   it("crearReservaWeb: reserva repetida con misma Idempotency-Key devuelve la misma", async () => {
     const { db } = crearDbFalsa([
       [{ id: 77, estado: "pendiente_pago" }], // SELECT ... WHERE creado_por (idempotencia: ya existe)
-      [{ valor_total: "100000.00", moneda: "COP" }], // compra ligada
+      [{ valor_total: "100000.00", moneda: "COP", pago_ref: null }], // compra ligada
     ]);
-    const r = await crearReservaWeb(db, {
+    const r = await crearReservaWeb(db, WOMPI_OFF, {
       slug: "valoracion-inicial", sedeCodigo: "TUNJA", fecha: "2026-12-01", hora: "09:00",
       paciente: { nombre: "Ana Torres" }, idempotencyKey: "clave-repetida-123",
     });
     expect(r).toMatchObject({ reservaId: 77, estado: "pendiente_pago", monto: 100000 });
+    expect(r.checkoutUrl).toBeUndefined();
+  });
+});
+
+describe("web/wompi", () => {
+  it("firmaIntegridad: SHA256 hex de 64 chars, determinista y sensible al secreto", () => {
+    const a = firmaIntegridad("FISIO-42-abcd1234", 9500000, "COP", "test_integrity_xxx");
+    const b = firmaIntegridad("FISIO-42-abcd1234", 9500000, "COP", "test_integrity_xxx");
+    const c = firmaIntegridad("FISIO-42-abcd1234", 9500000, "COP", "test_integrity_yyy");
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
   });
 });

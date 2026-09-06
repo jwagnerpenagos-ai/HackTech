@@ -105,6 +105,14 @@ export interface ReservaCreadaApi {
   moneda: string | null;
   nequi: string;
   expiraEn?: string;
+  /** Si viene, hay pasarela: el sitio debe redirigir acá para pagar. */
+  checkoutUrl?: string;
+  referenciaPago?: string;
+}
+
+export interface EstadoPagoApi {
+  estado: "aprobado" | "rechazado" | "pendiente" | "manual";
+  reservaId: number | null;
 }
 
 export interface CitaAdminApi {
@@ -137,6 +145,13 @@ export const api = {
     input: { servicio: string; sede: string; fecha: string; hora: string; paciente: PacienteReservaApi },
     idempotencyKey: string,
   ) => pedir<ReservaCreadaApi>("/api/reservas", { method: "POST", body: input, idempotencyKey }),
+
+  estadoPago: (params: { ref?: string; id?: string }) => {
+    const qs = new URLSearchParams();
+    if (params.ref) qs.set("ref", params.ref);
+    if (params.id) qs.set("id", params.id);
+    return pedir<EstadoPagoApi>(`/api/pagos/estado?${qs.toString()}`);
+  },
 
   // Admin
   login: (usuario: string, clave: string) =>

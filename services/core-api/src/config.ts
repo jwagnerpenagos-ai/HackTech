@@ -36,6 +36,16 @@ const EnvSchema = z.object({
   // uno efímero al arrancar (los tokens no sobreviven un reinicio).
   WEB_SESSION_SECRET: z.string().min(16).optional(),
   WEB_TOKEN_TTL_MIN: z.coerce.number().int().min(5).max(1440).default(480),
+  // URL pública del sitio, para armar la URL de retorno de la pasarela.
+  WEB_PUBLIC_URL: z.string().url().default("http://localhost:3000"),
+
+  // --- Pasarela de pago (Wompi) ---
+  // Vacío = modo manual: la reserva web queda pendiente_pago y Lina la
+  // confirma desde el panel (transferencia Nequi). Con llaves, la reserva
+  // manda al checkout de Wompi y se confirma sola al aprobarse el pago.
+  WOMPI_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
+  WOMPI_PUBLIC_KEY: z.string().default(""),
+  WOMPI_INTEGRITY_SECRET: z.string().default(""),
 
   // Límites defensivos de la superficie HTTP.
   CORE_API_MAX_BODY_BYTES: z.coerce.number().int().min(256).max(1_048_576).default(16_384),

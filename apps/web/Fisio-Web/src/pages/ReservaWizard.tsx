@@ -194,6 +194,12 @@ export function ReservaWizard() {
         },
         idempotencyKey,
       );
+      // Con pasarela: el backend devuelve la URL del checkout. Se sale del
+      // SPA hacia Wompi; al volver, /reservar/resultado consulta el estado.
+      if (r.checkoutUrl) {
+        window.location.assign(r.checkoutUrl);
+        return;
+      }
       setReferencia(r.referencia);
       setEnviado(true);
       goNext();

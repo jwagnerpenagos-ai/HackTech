@@ -4,6 +4,7 @@ import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { ErrorDominio } from "../errores.js";
 import { firmarToken, verificarToken, secretoEfimero } from "./token.js";
+import { wompiDeConfig } from "./wompi.js";
 import * as publico from "./publico.js";
 import * as admin from "./admin.js";
 
@@ -42,6 +43,7 @@ const LoginSchema = z.object({
 export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): void {
   const secreto = cfg.WEB_SESSION_SECRET ?? secretoEfimero();
   const ttlSeg = cfg.WEB_TOKEN_TTL_MIN * 60;
+  const wompi = wompiDeConfig(cfg);
 
   async function conDominio(reply: FastifyReply, fn: () => Promise<unknown>): Promise<unknown> {
     try {
@@ -87,7 +89,7 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
       return reply.code(400).send({ error: "idempotency_key_requerida" });
     }
     try {
-      const res = await publico.crearReservaWeb(db, {
+      const res = await publico.crearReservaWeb(db, wompi, {
         slug: body.data.servicio,
         sedeCodigo: body.data.sede,
         fecha: body.data.fecha,
@@ -103,6 +105,20 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
       }
       throw err;
     }
+  });
+
+  // Estado del pago al volver del checkout de la pasarela. `ref` = nuestra
+  // referencia; `id` = id de transacción de Wompi (uno de los dos).
+  app.get("/api/pagos/estado", async (req, reply) => {
+    const q = z
+      .object({ ref: z.string().min(1).max(120).optional(), id: z.string().min(1).max(120).optional() })
+      .safeParse(req.query);
+    if (!q.success || (!q.data.ref && !q.data.id)) {
+      return reply.code(400).send({ error: "parametros_invalidos" });
+    }
+    return conDominio(reply, () =>
+      publico.estadoPagoWeb(db, wompi, { referencia: q.data.ref, transaccionId: q.data.id }),
+    );
   });
 
   // --- Admin (sesión de Lina) -------------------------------------------

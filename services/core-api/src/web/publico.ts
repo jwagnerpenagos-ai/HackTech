@@ -3,7 +3,9 @@ import { ErrorDominio, normalizarErrorDb } from "../errores.js";
 import * as catalogo from "../dominio/catalogo.js";
 import * as pacientes from "../dominio/pacientes.js";
 import * as agenda from "../dominio/agenda.js";
+import * as pagos from "../dominio/pagos.js";
 import { codigoDeSlug, slugDeCodigo } from "./slugs.js";
+import { type Wompi, urlCheckout, consultarPorReferencia, consultarPorId } from "./wompi.js";
 
 /** fecha (YYYY-MM-DD) + hora (HH:MM) → timestamptz con offset fijo de Bogotá. */
 function tsBogota(fecha: string, hora: string): string {
@@ -150,6 +152,10 @@ export interface ReservaWebResultado {
   estado: string;
   monto: number | null;
   moneda: string | null;
+  /** Si viene, el sitio debe redirigir acá para pagar (pasarela). Sin esto: pago manual. */
+  checkoutUrl?: string;
+  /** Referencia del pago en la pasarela, para consultar el estado al volver. */
+  referenciaPago?: string;
 }
 
 /** Busca al paciente por documento; si no está, lo crea con los datos de la ficha del sitio. */
@@ -192,6 +198,7 @@ async function buscarOCrearPaciente(db: Db, p: PacienteWebInput): Promise<{ id: 
 
 export async function crearReservaWeb(
   db: Db,
+  wompi: Wompi,
   opts: { slug: string; sedeCodigo: string; fecha: string; hora: string; paciente: PacienteWebInput; idempotencyKey: string },
 ): Promise<ReservaWebResultado> {
   const creadoPor = `web:${opts.idempotencyKey}`;
@@ -203,19 +210,34 @@ export async function crearReservaWeb(
   );
   if (previa.rows[0]) {
     const id = Number(previa.rows[0].id);
-    const compra = await db.query<{ valor_total: string; moneda: string }>(
-      `SELECT c.valor_total, c.moneda
+    const compra = await db.query<{ valor_total: string; moneda: string; pago_ref: string | null }>(
+      `SELECT c.valor_total, c.moneda,
+              (SELECT p.referencia FROM comercial.pago p
+                WHERE p.compra_id = c.id AND p.estado = 'registrado'
+                ORDER BY p.id DESC LIMIT 1) AS pago_ref
          FROM agenda.reserva_participante rp
          JOIN comercial.compra c ON c.id = rp.compra_id
         WHERE rp.reserva_id = $1 LIMIT 1`,
       [id],
     );
+    const c = compra.rows[0];
+    const montoCents = c ? Math.round(Number(c.valor_total) * 100) : 0;
     return {
       reservaId: id,
       referencia: `FISIO-${id.toString(36).toUpperCase()}`,
       estado: previa.rows[0].estado,
-      monto: compra.rows[0] ? Number(compra.rows[0].valor_total) : null,
-      moneda: compra.rows[0]?.moneda ?? null,
+      monto: c ? Number(c.valor_total) : null,
+      moneda: c?.moneda ?? null,
+      ...(wompi.habilitado && c?.pago_ref && previa.rows[0].estado === "pendiente_pago"
+        ? {
+            checkoutUrl: urlCheckout(wompi, {
+              referencia: c.pago_ref,
+              montoCents,
+              moneda: c.moneda,
+            }),
+            referenciaPago: c.pago_ref,
+          }
+        : {}),
     };
   }
 
@@ -259,14 +281,94 @@ export async function crearReservaWeb(
       creadoPor,
       tarifa,
     });
-    return {
+    const monto = creada.montoTotal ?? tarifa.valorTotal;
+    const moneda = creada.moneda ?? tarifa.moneda;
+    const base: ReservaWebResultado = {
       reservaId: creada.reservaId,
       referencia: `FISIO-${creada.reservaId.toString(36).toUpperCase()}`,
       estado: "pendiente_pago",
-      monto: creada.montoTotal ?? tarifa.valorTotal,
-      moneda: creada.moneda ?? tarifa.moneda,
+      monto,
+      moneda,
+    };
+
+    if (!wompi.habilitado || creada.compraId === undefined) return base;
+
+    // Pasarela: se abre un pago `registrado` con una referencia única y se
+    // devuelve la URL del checkout. Al volver, GET /api/pagos/estado
+    // consulta Wompi y, si aprobó, verifica el pago (confirma la reserva).
+    const referenciaPago = `FISIO-${creada.reservaId}-${opts.idempotencyKey.slice(0, 8)}`;
+    await pagos.registrarPago(db, {
+      compraId: creada.compraId,
+      valor: monto,
+      referencia: referenciaPago,
+      creadoPor: "web/wompi",
+    });
+    return {
+      ...base,
+      checkoutUrl: urlCheckout(wompi, {
+        referencia: referenciaPago,
+        montoCents: Math.round(monto * 100),
+        moneda,
+        email: opts.paciente.email ?? null,
+        nombre: opts.paciente.nombre,
+        telefono: opts.paciente.telefono ?? null,
+      }),
+      referenciaPago,
     };
   } catch (err) {
     throw normalizarErrorDb(err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/pagos/estado — consulta la pasarela al volver del checkout
+// ---------------------------------------------------------------------------
+export interface EstadoPagoWeb {
+  estado: "aprobado" | "rechazado" | "pendiente" | "manual";
+  reservaId: number | null;
+}
+
+export async function estadoPagoWeb(
+  db: Db,
+  wompi: Wompi,
+  opts: { referencia?: string | undefined; transaccionId?: string | undefined },
+): Promise<EstadoPagoWeb> {
+  if (!wompi.habilitado) return { estado: "manual", reservaId: null };
+
+  // Localiza el pago registrado por su referencia (o vía la transacción).
+  let referencia = opts.referencia ?? null;
+  let tx = null as Awaited<ReturnType<typeof consultarPorReferencia>>;
+  if (opts.transaccionId) {
+    tx = await consultarPorId(wompi, opts.transaccionId);
+    referencia = tx?.referencia ?? referencia;
+  }
+  if (!referencia) return { estado: "pendiente", reservaId: null };
+
+  const fila = await db.query<{ id: number | string; estado: string; reserva_id: number | string | null }>(
+    `SELECT p.id, p.estado,
+            (SELECT rp.reserva_id FROM agenda.reserva_participante rp
+              WHERE rp.compra_id = p.compra_id LIMIT 1) AS reserva_id
+       FROM comercial.pago p
+      WHERE p.referencia = $1
+      ORDER BY p.id DESC LIMIT 1`,
+    [referencia],
+  );
+  const pago = fila.rows[0];
+  const reservaId = pago && pago.reserva_id !== null ? Number(pago.reserva_id) : null;
+  if (!pago) return { estado: "pendiente", reservaId };
+  if (pago.estado === "verificado") return { estado: "aprobado", reservaId };
+  if (pago.estado === "rechazado") return { estado: "rechazado", reservaId };
+
+  tx ??= await consultarPorReferencia(wompi, referencia);
+  if (!tx) return { estado: "pendiente", reservaId };
+
+  if (tx.estado === "APPROVED") {
+    await pagos.verificarPago(db, { pagoId: Number(pago.id), por: "wompi" });
+    return { estado: "aprobado", reservaId };
+  }
+  if (tx.estado === "DECLINED" || tx.estado === "VOIDED" || tx.estado === "ERROR") {
+    await pagos.rechazarPago(db, { pagoId: Number(pago.id), por: "wompi", motivo: `wompi:${tx.estado}` });
+    return { estado: "rechazado", reservaId };
+  }
+  return { estado: "pendiente", reservaId };
 }

@@ -72,10 +72,25 @@ Respuesta `201`:
 ```json
 { "reservaId": 42, "referencia": "FISIO-…", "estado": "pendiente_pago",
   "monto": 100000, "moneda": "COP", "nequi": "3113981422",
-  "expiraEn": "2026-09-19T09:00:00-05:00" }
+  "checkoutUrl": "https://checkout.wompi.co/p/?public-key=…",
+  "referenciaPago": "FISIO-42-9d66beac" }
 ```
-La cita nace `pendiente_pago`: se confirma cuando Lina verifica el pago
-(comprobante por Telegram o en el panel). Igual que el flujo del bot.
+La cita nace `pendiente_pago`. **Dos modos según config:**
+- **Con pasarela** (`WOMPI_PUBLIC_KEY` + `WOMPI_INTEGRITY_SECRET`): viene
+  `checkoutUrl` — el sitio redirige ahí. Al volver (Wompi agrega `?id=`), el
+  sitio consulta `GET /api/pagos/estado` y, si el pago aprobó, la cita se
+  confirma sola (el backend llama `comercial.verificar_pago`). La firma de
+  integridad se calcula en el servidor: `SHA256(referencia + montoCents + "COP" + WOMPI_INTEGRITY_SECRET)`.
+- **Sin pasarela**: no viene `checkoutUrl`. Pago manual por Nequi; Lina
+  confirma desde el panel (o el paciente reporta comprobante por el bot).
+
+### `GET /api/pagos/estado?ref=<referenciaPago>` · `&id=<txId de Wompi>`
+Consulta el estado del pago al volver del checkout. Uno de los dos parámetros.
+```json
+{ "estado": "aprobado" | "rechazado" | "pendiente" | "manual", "reservaId": 42 }
+```
+`aprobado` = pago verificado y cita confirmada. `pendiente` = todavía sin
+resolver (el sitio reintenta). `manual` = no hay pasarela configurada.
 
 Errores: `409 cupo_ocupado` (ese horario ya se tomó), `422 anticipacion_insuficiente`
 (menos de 24 h), `422 valoracion_requerida` (paciente conocido sin valoración
