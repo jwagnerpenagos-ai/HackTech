@@ -10,22 +10,22 @@ import { api, type EstadoPagoApi } from "@/lib/api";
 const NEQUI = "3113981422";
 
 /**
- * Pantalla de retorno del checkout de la pasarela. Wompi vuelve con `?id=` y
- * nosotros agregamos `?ref=`. Se consulta el estado del pago unas cuantas
- * veces (la confirmación puede tardar unos segundos) y se muestra el
- * resultado. Sin pasarela configurada el backend responde `manual`.
+ * Pantalla de retorno del checkout. Mercado Pago vuelve con `payment_id` y
+ * `status`; nosotros pasamos `ref` en las back_urls. Se consulta el estado
+ * del pago unas cuantas veces (la confirmación puede tardar unos segundos) y
+ * se muestra el resultado. Sin pasarela configurada el backend responde `manual`.
  */
 export default function ResultadoPagoPage() {
   const [params] = useSearchParams();
   const ref = params.get("ref") ?? undefined;
-  const id = params.get("id") ?? undefined;
+  const paymentId = params.get("payment_id") ?? undefined;
 
   const [estado, setEstado] = useState<EstadoPagoApi["estado"] | "consultando" | "error">("consultando");
   const [reservaId, setReservaId] = useState<number | null>(null);
   const intentos = useRef(0);
 
   useEffect(() => {
-    if (!ref && !id) {
+    if (!ref) {
       setEstado("error");
       return;
     }
@@ -34,7 +34,7 @@ export default function ResultadoPagoPage() {
 
     const consultar = async () => {
       try {
-        const r = await api.estadoPago({ ref, id });
+        const r = await api.estadoPago({ ref, paymentId });
         if (!vivo) return;
         setReservaId(r.reservaId);
         if (r.estado === "pendiente" && intentos.current < 6) {
@@ -53,7 +53,7 @@ export default function ResultadoPagoPage() {
       vivo = false;
       clearTimeout(timer);
     };
-  }, [ref, id]);
+  }, [ref, paymentId]);
 
   return (
     <>

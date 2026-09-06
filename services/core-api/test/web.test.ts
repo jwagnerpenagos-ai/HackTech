@@ -3,17 +3,10 @@ import { crearDbFalsa } from "./fakeDb.js";
 import { codigoDeSlug, slugDeCodigo } from "../src/web/slugs.js";
 import { firmarToken, verificarToken } from "../src/web/token.js";
 import { listarServiciosWeb, disponibilidadWeb, crearReservaWeb, resolverPagoMock } from "../src/web/publico.js";
-import { firmaIntegridad, urlCheckout, type Wompi } from "../src/web/wompi.js";
+import { crearCheckout, type Pasarela } from "../src/web/pasarela.js";
 
-const WOMPI_OFF: Wompi = {
-  habilitado: false,
-  mock: false,
-  publicKey: "",
-  integritySecret: "",
-  apiBase: "https://sandbox.wompi.co/v1",
-  checkoutBase: "https://checkout.wompi.co/p/",
-  redirectBase: "http://localhost:3000/reservar/resultado",
-};
+const P_MANUAL: Pasarela = { modo: "manual", activa: false, accessToken: "", sitioUrl: "http://localhost:3000" };
+const P_MOCK: Pasarela = { modo: "mock", activa: true, accessToken: "", sitioUrl: "http://localhost:3000" };
 
 describe("web/slugs", () => {
   it("traduce slug <-> codigo en ambos sentidos", () => {
@@ -75,7 +68,7 @@ describe("web/publico", () => {
       [{ id: 77, estado: "pendiente_pago" }], // SELECT ... WHERE creado_por (idempotencia: ya existe)
       [{ valor_total: "100000.00", moneda: "COP", pago_ref: null }], // compra ligada
     ]);
-    const r = await crearReservaWeb(db, WOMPI_OFF, {
+    const r = await crearReservaWeb(db, P_MANUAL, {
       slug: "valoracion-inicial", sedeCodigo: "TUNJA", fecha: "2026-12-01", hora: "09:00",
       paciente: { nombre: "Ana Torres" }, idempotencyKey: "clave-repetida-123",
     });
@@ -84,31 +77,23 @@ describe("web/publico", () => {
   });
 });
 
-describe("web/wompi", () => {
-  it("firmaIntegridad: SHA256 hex de 64 chars, determinista y sensible al secreto", () => {
-    const a = firmaIntegridad("FISIO-42-abcd1234", 9500000, "COP", "test_integrity_xxx");
-    const b = firmaIntegridad("FISIO-42-abcd1234", 9500000, "COP", "test_integrity_xxx");
-    const c = firmaIntegridad("FISIO-42-abcd1234", 9500000, "COP", "test_integrity_yyy");
-    expect(a).toMatch(/^[0-9a-f]{64}$/);
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
+describe("web/pasarela", () => {
+  it("crearCheckout en manual devuelve null", async () => {
+    expect(
+      await crearCheckout(P_MANUAL, { referencia: "FISIO-9-abcd", monto: 100000, moneda: "COP", descripcion: "x" }),
+    ).toBeNull();
   });
 
-  it("urlCheckout en mock apunta al checkout simulado del sitio, sin firma", () => {
-    const w: Wompi = {
-      habilitado: true,
-      mock: true,
-      publicKey: "",
-      integritySecret: "",
-      apiBase: "https://sandbox.wompi.co/v1",
-      checkoutBase: "http://localhost:3000/reservar/pago-simulado",
-      redirectBase: "http://localhost:3000/reservar/resultado",
-    };
-    const url = urlCheckout(w, { referencia: "FISIO-9-abcd1234", montoCents: 10000000, moneda: "COP" });
-    expect(url).toContain("/reservar/pago-simulado?");
+  it("crearCheckout en mock apunta al checkout simulado del sitio", async () => {
+    const url = await crearCheckout(P_MOCK, {
+      referencia: "FISIO-9-abcd1234",
+      monto: 100000,
+      moneda: "COP",
+      descripcion: "Valoración inicial",
+    });
+    expect(url).toContain("http://localhost:3000/reservar/pago-simulado?");
     expect(url).toContain("ref=FISIO-9-abcd1234");
-    expect(url).toContain("monto=10000000");
-    expect(url).not.toContain("signature");
+    expect(url).toContain("monto=100000");
   });
 });
 

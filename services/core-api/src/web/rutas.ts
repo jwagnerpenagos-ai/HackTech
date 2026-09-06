@@ -4,7 +4,7 @@ import type { Config } from "../config.js";
 import type { Db } from "../db.js";
 import { ErrorDominio } from "../errores.js";
 import { firmarToken, verificarToken, secretoEfimero } from "./token.js";
-import { wompiDeConfig } from "./wompi.js";
+import { pasarelaDeConfig } from "./pasarela.js";
 import * as publico from "./publico.js";
 import * as admin from "./admin.js";
 
@@ -43,7 +43,7 @@ const LoginSchema = z.object({
 export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): void {
   const secreto = cfg.WEB_SESSION_SECRET ?? secretoEfimero();
   const ttlSeg = cfg.WEB_TOKEN_TTL_MIN * 60;
-  const wompi = wompiDeConfig(cfg);
+  const pasarela = pasarelaDeConfig(cfg);
 
   async function conDominio(reply: FastifyReply, fn: () => Promise<unknown>): Promise<unknown> {
     try {
@@ -89,7 +89,7 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
       return reply.code(400).send({ error: "idempotency_key_requerida" });
     }
     try {
-      const res = await publico.crearReservaWeb(db, wompi, {
+      const res = await publico.crearReservaWeb(db, pasarela, {
         slug: body.data.servicio,
         sedeCodigo: body.data.sede,
         fecha: body.data.fecha,
@@ -107,23 +107,26 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
     }
   });
 
-  // Estado del pago al volver del checkout de la pasarela. `ref` = nuestra
-  // referencia; `id` = id de transacción de Wompi (uno de los dos).
+  // Estado del pago al volver del checkout. `ref` = nuestra referencia (la
+  // pasamos en back_urls); `payment_id` = id de pago de Mercado Pago.
   app.get("/api/pagos/estado", async (req, reply) => {
     const q = z
-      .object({ ref: z.string().min(1).max(120).optional(), id: z.string().min(1).max(120).optional() })
+      .object({
+        ref: z.string().min(1).max(120).optional(),
+        payment_id: z.string().min(1).max(120).optional(),
+      })
       .safeParse(req.query);
-    if (!q.success || (!q.data.ref && !q.data.id)) {
+    if (!q.success || !q.data.ref) {
       return reply.code(400).send({ error: "parametros_invalidos" });
     }
     return conDominio(reply, () =>
-      publico.estadoPagoWeb(db, wompi, { referencia: q.data.ref, transaccionId: q.data.id }),
+      publico.estadoPagoWeb(db, pasarela, { referencia: q.data.ref, paymentId: q.data.payment_id }),
     );
   });
 
-  // Decisión del checkout simulado (solo con WOMPI_ENV=mock).
+  // Decisión del checkout simulado (solo con PASARELA_MODO=mock).
   app.post("/api/pagos/mock", async (req, reply) => {
-    if (!wompi.mock) return reply.code(404).send({ error: "no_encontrado" });
+    if (pasarela.modo !== "mock") return reply.code(404).send({ error: "no_encontrado" });
     const b = z.object({ referencia: z.string().min(1).max(120), aprobar: z.boolean() }).safeParse(req.body);
     if (!b.success) return reply.code(400).send({ error: "cuerpo_invalido" });
     return conDominio(reply, () => publico.resolverPagoMock(db, b.data.referencia, b.data.aprobar));

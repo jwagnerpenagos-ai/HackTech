@@ -146,14 +146,13 @@ export const api = {
     idempotencyKey: string,
   ) => pedir<ReservaCreadaApi>("/api/reservas", { method: "POST", body: input, idempotencyKey }),
 
-  estadoPago: (params: { ref?: string; id?: string }) => {
-    const qs = new URLSearchParams();
-    if (params.ref) qs.set("ref", params.ref);
-    if (params.id) qs.set("id", params.id);
+  estadoPago: (params: { ref: string; paymentId?: string }) => {
+    const qs = new URLSearchParams({ ref: params.ref });
+    if (params.paymentId) qs.set("payment_id", params.paymentId);
     return pedir<EstadoPagoApi>(`/api/pagos/estado?${qs.toString()}`);
   },
 
-  /** Checkout simulado (WOMPI_ENV=mock): registra la decisión de pago. */
+  /** Checkout simulado (PASARELA_MODO=mock): registra la decisión de pago. */
   pagoMock: (referencia: string, aprobar: boolean) =>
     pedir<{ estado: string; reservaId: number | null }>("/api/pagos/mock", {
       method: "POST",

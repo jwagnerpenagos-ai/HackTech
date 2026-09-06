@@ -5,19 +5,19 @@ import { Container } from "@/components/ui/container";
 import { api } from "@/lib/api";
 
 /**
- * Checkout simulado — solo cuando el backend corre con WOMPI_ENV=mock (demo
+ * Checkout simulado — solo cuando el backend corre con PASARELA_MODO=mock (demo
  * sin cuenta de pasarela). Imita el paso de pago: muestra el monto y dos
  * botones. La decisión va a POST /api/pagos/mock y luego se redirige a
- * /reservar/resultado, igual que volvería de Wompi.
+ * /reservar/resultado, igual que volvería de Mercado Pago.
  */
 export default function PagoSimuladoPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const ref = params.get("ref") ?? "";
-  const montoCents = Number(params.get("monto") ?? "0");
+  const montoPesos = Number(params.get("monto") ?? "0");
   const [procesando, setProcesando] = useState<"" | "aprobar" | "rechazar">("");
 
-  const monto = (montoCents / 100).toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+  const monto = montoPesos.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 
   const decidir = async (aprobar: boolean) => {
     if (!ref || procesando) return;
@@ -42,7 +42,7 @@ export default function PagoSimuladoPage() {
           <p className="mt-1 text-xs text-slate-400">Ref: {ref}</p>
 
           <div className="mt-8 rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
-            Este es un checkout de demostración. En producción esto es Wompi (Nequi, PSE, tarjeta).
+            Este es un checkout de demostración. En producción esto es Mercado Pago (Nequi, PSE, tarjeta).
           </div>
 
           <div className="mt-6 grid gap-3">

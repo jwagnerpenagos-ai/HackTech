@@ -72,28 +72,29 @@ Respuesta `201`:
 ```json
 { "reservaId": 42, "referencia": "FISIO-…", "estado": "pendiente_pago",
   "monto": 100000, "moneda": "COP", "nequi": "3113981422",
-  "checkoutUrl": "https://checkout.wompi.co/p/?public-key=…",
+  "checkoutUrl": "https://www.mercadopago.com.co/checkout/v1/redirect?...",
   "referenciaPago": "FISIO-42-9d66beac" }
 ```
-La cita nace `pendiente_pago`. **Tres modos según `WOMPI_ENV`:**
-- **`sandbox` / `production`** (con `WOMPI_PUBLIC_KEY` + `WOMPI_INTEGRITY_SECRET`):
-  viene `checkoutUrl` al checkout de Wompi. Al volver (Wompi agrega `?id=`), el
-  sitio consulta `GET /api/pagos/estado`; si aprobó, la cita se confirma sola
-  (`comercial.verificar_pago`). Firma calculada en el servidor:
-  `SHA256(referencia + montoCents + "COP" + WOMPI_INTEGRITY_SECRET)`.
-- **`mock`** (sin llaves): `checkoutUrl` apunta a `/reservar/pago-simulado`
-  del propio sitio — un checkout de demo con botones Aprobar/Rechazar que
-  llaman `POST /api/pagos/mock`. Misma confirmación automática. Para demo sin
-  cuenta de pasarela.
-- **manual** (por defecto, `WOMPI_ENV` distinto de `mock` y sin llaves): no
-  viene `checkoutUrl`. Pago por Nequi; Lina confirma desde el panel.
+La cita nace `pendiente_pago`. **Tres modos según `PASARELA_MODO`:**
+- **`mercadopago`** (con `MP_ACCESS_TOKEN`, usar el token de PRUEBA `TEST-…`
+  de developers.mercadopago.com): el backend crea una preferencia de Checkout
+  Pro con `external_reference` = la referencia del pago y devuelve
+  `checkoutUrl` (`sandbox_init_point`). Al volver, Mercado Pago agrega
+  `payment_id` y `status` a la `back_url`; el sitio llama
+  `GET /api/pagos/estado?ref=…&payment_id=…` y, si el pago quedó `approved`,
+  la cita se confirma sola (`comercial.verificar_pago`).
+- **`mock`**: `checkoutUrl` apunta a `/reservar/pago-simulado` del propio
+  sitio — un checkout de demo con botones Aprobar/Rechazar que llaman
+  `POST /api/pagos/mock`. Misma confirmación automática. Para demo sin cuenta.
+- **`manual`** (por defecto): no viene `checkoutUrl`. Pago por Nequi; Lina
+  confirma desde el panel.
 
-### `POST /api/pagos/mock` — solo con `WOMPI_ENV=mock`
+### `POST /api/pagos/mock` — solo con `PASARELA_MODO=mock`
 Body `{ "referencia": "<referenciaPago>", "aprobar": true|false }`. Verifica o
 rechaza el pago. `404` si el modo no es `mock`.
 
-### `GET /api/pagos/estado?ref=<referenciaPago>` · `&id=<txId de Wompi>`
-Consulta el estado del pago al volver del checkout. Uno de los dos parámetros.
+### `GET /api/pagos/estado?ref=<referenciaPago>` · `&payment_id=<id de Mercado Pago>`
+Consulta el estado del pago al volver del checkout. `ref` es obligatorio.
 ```json
 { "estado": "aprobado" | "rechazado" | "pendiente" | "manual", "reservaId": 42 }
 ```

@@ -39,16 +39,12 @@ const EnvSchema = z.object({
   // URL pública del sitio, para armar la URL de retorno de la pasarela.
   WEB_PUBLIC_URL: z.string().url().default("http://localhost:3000"),
 
-  // --- Pasarela de pago (Wompi) ---
-  // Modo manual (por defecto, sin llaves): la reserva web queda
-  // pendiente_pago y Lina la confirma desde el panel (transferencia Nequi).
-  //   WOMPI_ENV=mock      -> checkout simulado servido por el propio sitio
-  //                          (para demo sin cuenta de Wompi). No usa llaves.
-  //   WOMPI_ENV=sandbox   -> checkout real de Wompi con llaves pub_test_.
-  //   WOMPI_ENV=production -> con llaves pub_prod_.
-  WOMPI_ENV: z.enum(["mock", "sandbox", "production"]).default("sandbox"),
-  WOMPI_PUBLIC_KEY: z.string().default(""),
-  WOMPI_INTEGRITY_SECRET: z.string().default(""),
+  // --- Pasarela de pago ---
+  //   manual      -> sin pasarela: reserva pendiente_pago, Lina confirma en el panel.
+  //   mock        -> checkout simulado por el propio sitio (demo sin cuenta).
+  //   mercadopago -> Checkout Pro real; requiere MP_ACCESS_TOKEN (token de PRUEBA TEST-…).
+  PASARELA_MODO: z.enum(["manual", "mock", "mercadopago"]).default("manual"),
+  MP_ACCESS_TOKEN: z.string().default(""),
 
   // Límites defensivos de la superficie HTTP.
   CORE_API_MAX_BODY_BYTES: z.coerce.number().int().min(256).max(1_048_576).default(16_384),
