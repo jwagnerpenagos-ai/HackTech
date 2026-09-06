@@ -3,9 +3,7 @@ import { ErrorDominio, normalizarErrorDb } from "../errores.js";
 import * as catalogo from "../dominio/catalogo.js";
 import * as pacientes from "../dominio/pacientes.js";
 import * as agenda from "../dominio/agenda.js";
-import * as pagos from "../dominio/pagos.js";
 import { codigoDeSlug, slugDeCodigo } from "./slugs.js";
-import { type Pasarela, crearCheckout, estadoTransaccion } from "./pasarela.js";
 
 /** fecha (YYYY-MM-DD) + hora (HH:MM) → timestamptz con offset fijo de Bogotá. */
 function tsBogota(fecha: string, hora: string): string {
@@ -148,14 +146,13 @@ export interface PacienteWebInput {
 
 export interface ReservaWebResultado {
   reservaId: number;
+  reservaUuid: string;
   referencia: string;
   estado: string;
   monto: number | null;
   moneda: string | null;
-  /** Si viene, el sitio debe redirigir acá para pagar (pasarela). Sin esto: pago manual. */
-  checkoutUrl?: string;
-  /** Referencia del pago en la pasarela, para consultar el estado al volver. */
-  referenciaPago?: string;
+  /** Enlace al bot para enviar el comprobante de pago de esta reserva. */
+  telegramPago: string;
 }
 
 /** Busca al paciente por documento; si no está, lo crea con los datos de la ficha del sitio. */
@@ -196,48 +193,42 @@ async function buscarOCrearPaciente(db: Db, p: PacienteWebInput): Promise<{ id: 
   return { id: Number((r.rows[0] as { id: number | string }).id) };
 }
 
+/** t.me/<bot>?start=pago_<uuid> — el bot reconoce ese payload y pide el comprobante. */
+function enlaceTelegramPago(botUsername: string, reservaUuid: string): string {
+  return `https://t.me/${botUsername}?start=pago_${reservaUuid}`;
+}
+
 export async function crearReservaWeb(
   db: Db,
-  pasarela: Pasarela,
+  botUsername: string,
   opts: { slug: string; sedeCodigo: string; fecha: string; hora: string; paciente: PacienteWebInput; idempotencyKey: string },
 ): Promise<ReservaWebResultado> {
   const creadoPor = `web:${opts.idempotencyKey}`;
 
   // Idempotencia sin tabla nueva: la clave se guarda en reserva.creado_por.
-  const previa = await db.query<{ id: number | string; estado: string }>(
-    `SELECT id, estado FROM agenda.reserva WHERE creado_por = $1 LIMIT 1`,
+  const previa = await db.query<{ id: number | string; uuid: string; estado: string }>(
+    `SELECT id, uuid, estado FROM agenda.reserva WHERE creado_por = $1 LIMIT 1`,
     [creadoPor],
   );
   if (previa.rows[0]) {
     const id = Number(previa.rows[0].id);
-    const compra = await db.query<{ valor_total: string; moneda: string; pago_ref: string | null }>(
-      `SELECT c.valor_total, c.moneda,
-              (SELECT p.referencia FROM comercial.pago p
-                WHERE p.compra_id = c.id AND p.estado = 'registrado'
-                ORDER BY p.id DESC LIMIT 1) AS pago_ref
+    const compra = await db.query<{ valor_total: string; moneda: string }>(
+      `SELECT c.valor_total, c.moneda
          FROM agenda.reserva_participante rp
          JOIN comercial.compra c ON c.id = rp.compra_id
         WHERE rp.reserva_id = $1 LIMIT 1`,
       [id],
     );
     const c = compra.rows[0];
-    const base: ReservaWebResultado = {
+    return {
       reservaId: id,
+      reservaUuid: previa.rows[0].uuid,
       referencia: `FISIO-${id.toString(36).toUpperCase()}`,
       estado: previa.rows[0].estado,
       monto: c ? Number(c.valor_total) : null,
       moneda: c?.moneda ?? null,
+      telegramPago: enlaceTelegramPago(botUsername, previa.rows[0].uuid),
     };
-    if (pasarela.activa && c?.pago_ref && previa.rows[0].estado === "pendiente_pago") {
-      const url = await crearCheckout(pasarela, {
-        referencia: c.pago_ref,
-        monto: Number(c.valor_total),
-        moneda: c.moneda,
-        descripcion: "Cita — La Fisioterapeuta Li",
-      });
-      if (url) return { ...base, checkoutUrl: url, referenciaPago: c.pago_ref };
-    }
-    return base;
   }
 
   const codigo = codigoDeSlug(opts.slug);
@@ -280,117 +271,20 @@ export async function crearReservaWeb(
       creadoPor,
       tarifa,
     });
-    const monto = creada.montoTotal ?? tarifa.valorTotal;
-    const moneda = creada.moneda ?? tarifa.moneda;
-    const base: ReservaWebResultado = {
+    const uuidRow = await db.query<{ uuid: string }>(`SELECT uuid FROM agenda.reserva WHERE id = $1`, [
+      creada.reservaId,
+    ]);
+    const reservaUuid = uuidRow.rows[0]?.uuid ?? "";
+    return {
       reservaId: creada.reservaId,
+      reservaUuid,
       referencia: `FISIO-${creada.reservaId.toString(36).toUpperCase()}`,
       estado: "pendiente_pago",
-      monto,
-      moneda,
+      monto: creada.montoTotal ?? tarifa.valorTotal,
+      moneda: creada.moneda ?? tarifa.moneda,
+      telegramPago: enlaceTelegramPago(botUsername, reservaUuid),
     };
-
-    if (!pasarela.activa || creada.compraId === undefined) return base;
-
-    // Pasarela: se abre un pago `registrado` con una referencia única y se
-    // devuelve la URL del checkout. Al volver, GET /api/pagos/estado consulta
-    // la pasarela y, si aprobó, verifica el pago (confirma la reserva).
-    const referenciaPago = `FISIO-${creada.reservaId}-${opts.idempotencyKey.slice(0, 8)}`;
-    await pagos.registrarPago(db, {
-      compraId: creada.compraId,
-      valor: monto,
-      referencia: referenciaPago,
-      creadoPor: "web/pasarela",
-    });
-    const url = await crearCheckout(pasarela, {
-      referencia: referenciaPago,
-      monto,
-      moneda,
-      descripcion: `${servicio.nombre} — La Fisioterapeuta Li`,
-      email: opts.paciente.email ?? null,
-    });
-    if (!url) return base; // la pasarela falló: cae a pago manual
-    return { ...base, checkoutUrl: url, referenciaPago };
   } catch (err) {
     throw normalizarErrorDb(err);
   }
-}
-
-// ---------------------------------------------------------------------------
-// GET /api/pagos/estado — consulta la pasarela al volver del checkout
-// ---------------------------------------------------------------------------
-export interface EstadoPagoWeb {
-  estado: "aprobado" | "rechazado" | "pendiente" | "manual";
-  reservaId: number | null;
-}
-
-export async function estadoPagoWeb(
-  db: Db,
-  pasarela: Pasarela,
-  opts: { referencia?: string | undefined; paymentId?: string | undefined },
-): Promise<EstadoPagoWeb> {
-  if (pasarela.modo === "manual") return { estado: "manual", reservaId: null };
-  if (!opts.referencia) return { estado: "pendiente", reservaId: null };
-
-  const fila = await db.query<{ id: number | string; estado: string; reserva_id: number | string | null }>(
-    `SELECT p.id, p.estado,
-            (SELECT rp.reserva_id FROM agenda.reserva_participante rp
-              WHERE rp.compra_id = p.compra_id LIMIT 1) AS reserva_id
-       FROM comercial.pago p
-      WHERE p.referencia = $1
-      ORDER BY p.id DESC LIMIT 1`,
-    [opts.referencia],
-  );
-  const pago = fila.rows[0];
-  const reservaId = pago && pago.reserva_id !== null ? Number(pago.reserva_id) : null;
-  if (!pago) return { estado: "pendiente", reservaId };
-  if (pago.estado === "verificado") return { estado: "aprobado", reservaId };
-  if (pago.estado === "rechazado") return { estado: "rechazado", reservaId };
-  // En mock la decisión la toma el checkout simulado (POST /api/pagos/mock),
-  // que ya movió el pago a verificado/rechazado — acá solo queda "pendiente".
-  if (pasarela.modo === "mock") return { estado: "pendiente", reservaId };
-
-  const tx = await estadoTransaccion(pasarela, { referencia: opts.referencia, paymentId: opts.paymentId });
-  if (tx === "aprobado") {
-    await pagos.verificarPago(db, { pagoId: Number(pago.id), por: "mercadopago" });
-    return { estado: "aprobado", reservaId };
-  }
-  if (tx === "rechazado") {
-    await pagos.rechazarPago(db, { pagoId: Number(pago.id), por: "mercadopago", motivo: "pasarela:rechazado" });
-    return { estado: "rechazado", reservaId };
-  }
-  return { estado: "pendiente", reservaId };
-}
-
-/**
- * Checkout simulado (PASARELA_MODO=mock): la página de pago llama acá con la
- * decisión y el backend verifica/rechaza el pago igual que lo haría la
- * pasarela real. Solo para demo, nunca en producción.
- */
-export async function resolverPagoMock(
-  db: Db,
-  referencia: string,
-  aprobar: boolean,
-): Promise<{ estado: "aprobado" | "rechazado"; reservaId: number | null }> {
-  const fila = await db.query<{ id: number | string; estado: string; reserva_id: number | string | null }>(
-    `SELECT p.id, p.estado,
-            (SELECT rp.reserva_id FROM agenda.reserva_participante rp
-              WHERE rp.compra_id = p.compra_id LIMIT 1) AS reserva_id
-       FROM comercial.pago p
-      WHERE p.referencia = $1
-      ORDER BY p.id DESC LIMIT 1`,
-    [referencia],
-  );
-  const pago = fila.rows[0];
-  if (!pago) throw new ErrorDominio("No se encontró el pago.", "no_encontrado", 404);
-  const reservaId = pago.reserva_id !== null ? Number(pago.reserva_id) : null;
-
-  if (pago.estado === "registrado") {
-    if (aprobar) {
-      await pagos.verificarPago(db, { pagoId: Number(pago.id), por: "mock" });
-    } else {
-      await pagos.rechazarPago(db, { pagoId: Number(pago.id), por: "mock", motivo: "mock:rechazado" });
-    }
-  }
-  return { estado: aprobar ? "aprobado" : "rechazado", reservaId };
 }

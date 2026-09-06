@@ -185,3 +185,70 @@ export async function rechazarPago(
     throw normalizarErrorDb(err);
   }
 }
+
+/**
+ * Entrada del flujo "pagar por Telegram" que arranca desde el sitio web: el
+ * paciente abre t.me/<bot>?start=pago_<uuid>. Se busca la reserva por su
+ * uuid público, se vincula el chat al paciente (si aún no lo está) y se
+ * devuelven los datos que el bot necesita para pedir el comprobante. El
+ * comprobante en sí lo registra `registrarPago` cuando llega la foto.
+ */
+export interface DatosPagoWeb {
+  encontrada: boolean;
+  estado: string;
+  reservaId: number;
+  compraId: number | null;
+  monto: number | null;
+  moneda: string | null;
+  servicio: string | null;
+  iniciaEn: string;
+}
+
+export async function iniciarPagoWeb(
+  db: Db,
+  opts: { reservaUuid: string; chatId: number },
+): Promise<DatosPagoWeb> {
+  const r = await db.query<{
+    id: number | string;
+    estado: string;
+    compra_id: number | string | null;
+    paciente_id: number | string | null;
+    valor_total: string | null;
+    moneda: string | null;
+    servicio: string | null;
+    inicia_en: string;
+  }>(
+    `SELECT r.id, r.estado, rp.compra_id, rp.paciente_id,
+            c.valor_total, c.moneda, s.nombre AS servicio,
+            lower(r.franja_clinica) AS inicia_en
+       FROM agenda.reserva r
+       LEFT JOIN agenda.reserva_participante rp ON rp.reserva_id = r.id
+       LEFT JOIN comercial.compra c ON c.id = rp.compra_id
+       LEFT JOIN catalogo.servicio s ON s.id = r.servicio_id
+      WHERE r.uuid = $1 AND r.tipo = 'cita'
+      LIMIT 1`,
+    [opts.reservaUuid],
+  );
+  const f = r.rows[0];
+  if (!f) throw new ErrorDominio("No se encontró esa reserva.", "no_encontrado", 404);
+
+  if (f.paciente_id !== null) {
+    await db.query(
+      `INSERT INTO personas.vinculo_telegram (chat_id, paciente_id, verificado_en)
+       VALUES ($1, $2, now())
+       ON CONFLICT (chat_id) DO NOTHING`,
+      [opts.chatId, Number(f.paciente_id)],
+    );
+  }
+
+  return {
+    encontrada: true,
+    estado: f.estado,
+    reservaId: Number(f.id),
+    compraId: f.compra_id === null ? null : Number(f.compra_id),
+    monto: f.valor_total === null ? null : Number(f.valor_total),
+    moneda: f.moneda,
+    servicio: f.servicio,
+    iniciaEn: f.inicia_en,
+  };
+}

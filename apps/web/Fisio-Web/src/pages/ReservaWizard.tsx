@@ -118,6 +118,7 @@ export function ReservaWizard() {
   const [hora, setHora] = useState<string>("");
   const [enviado, setEnviado] = useState(false);
   const [referencia, setReferencia] = useState("");
+  const [telegramPago, setTelegramPago] = useState("");
   const [errorEnvio, setErrorEnvio] = useState("");
   const [enviando, setEnviando] = useState(false);
 
@@ -194,13 +195,8 @@ export function ReservaWizard() {
         },
         idempotencyKey,
       );
-      // Con pasarela: el backend devuelve la URL del checkout. Se sale del
-      // SPA hacia la pasarela; al volver, /reservar/resultado consulta el estado.
-      if (r.checkoutUrl) {
-        window.location.assign(r.checkoutUrl);
-        return;
-      }
       setReferencia(r.referencia);
+      setTelegramPago(r.telegramPago);
       setEnviado(true);
       goNext();
     } catch (e) {
@@ -790,11 +786,35 @@ export function ReservaWizard() {
                 <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 p-4 shadow-xs">
                   <CreditCard size={18} className="mt-0.5 shrink-0 text-deep-600" />
                   <div>
-                    <p className="text-xs font-bold text-ink-900">Pago por Adelantado</p>
+                    <p className="text-xs font-bold text-ink-900">Pago por adelantado — 100%</p>
                     <p className="mt-0.5 text-xs text-ink-600">
-                      Puedes completar el pago vía Nequi al <strong className="text-ink-900">{contacto.nequi}</strong> o en efectivo.
+                      Transfiere{" "}
+                      <strong className="text-ink-900">
+                        {servicio?.precio != null
+                          ? `$${servicio.precio.toLocaleString("es-CO")} ${servicio.moneda ?? "COP"}`
+                          : "el valor de la cita"}
+                      </strong>{" "}
+                      por Nequi a la Llave <strong className="text-ink-900">{contacto.nequi}</strong>. Tu cupo queda
+                      reservado mientras confirmamos el pago.
                     </p>
                   </div>
+                </div>
+
+                <div className="rounded-2xl border border-deep-600/30 bg-deep-600/5 p-4 text-left shadow-xs">
+                  <p className="text-xs font-bold text-ink-900">Envía el comprobante por Telegram</p>
+                  <p className="mt-0.5 text-xs text-ink-600">
+                    Abre nuestro bot, envía la foto del comprobante y te confirmamos la cita ahí mismo.
+                  </p>
+                  {telegramPago && (
+                    <a
+                      href={telegramPago}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-3 inline-flex items-center gap-2 rounded-full bg-[#229ED9] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110"
+                    >
+                      Abrir Telegram y enviar el comprobante
+                    </a>
+                  )}
                 </div>
               </div>
 

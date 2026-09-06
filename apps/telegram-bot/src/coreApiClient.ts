@@ -38,6 +38,18 @@ const CitaPorAsistir = z.object({
 });
 export type CitaPorAsistir = z.infer<typeof CitaPorAsistir>;
 
+const DatosPagoWeb = z.object({
+  encontrada: z.boolean(),
+  estado: z.string(),
+  reservaId: z.number(),
+  compraId: z.number().nullable(),
+  monto: z.number().nullable(),
+  moneda: z.string().nullable(),
+  servicio: z.string().nullable(),
+  iniciaEn: z.string(),
+});
+export type DatosPagoWeb = z.infer<typeof DatosPagoWeb>;
+
 const AsistenciaRegistrada = z.object({
   reservaId: z.number(),
   estado: z.string(),
@@ -91,6 +103,10 @@ export interface ClienteCoreApi {
     cfg: Config,
     p: { reservaId: number; asistio: boolean; por: string },
   ): Promise<ResultadoCoreApi<AsistenciaRegistrada>>;
+  iniciarPagoWeb(
+    cfg: Config,
+    p: { reservaUuid: string; chatId: number },
+  ): Promise<ResultadoCoreApi<DatosPagoWeb>>;
 }
 
 export const coreApi: ClienteCoreApi = {
@@ -141,6 +157,12 @@ export const coreApi: ClienteCoreApi = {
     const r = await pedir(cfg, "/asistencia", { reserva_id: p.reservaId, asistio: p.asistio, por: p.por });
     if (!r.ok) return r;
     const d = AsistenciaRegistrada.safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async iniciarPagoWeb(cfg, p) {
+    const r = await pedir(cfg, "/pagos/web/iniciar", { reserva_uuid: p.reservaUuid, chat_id: p.chatId });
+    if (!r.ok) return r;
+    const d = DatosPagoWeb.safeParse(r.datos);
     return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
   },
 };

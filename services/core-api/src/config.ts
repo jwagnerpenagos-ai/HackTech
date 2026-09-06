@@ -36,15 +36,10 @@ const EnvSchema = z.object({
   // uno efímero al arrancar (los tokens no sobreviven un reinicio).
   WEB_SESSION_SECRET: z.string().min(16).optional(),
   WEB_TOKEN_TTL_MIN: z.coerce.number().int().min(5).max(1440).default(480),
-  // URL pública del sitio, para armar la URL de retorno de la pasarela.
-  WEB_PUBLIC_URL: z.string().url().default("http://localhost:3000"),
 
-  // --- Pasarela de pago ---
-  //   manual      -> sin pasarela: reserva pendiente_pago, Lina confirma en el panel.
-  //   mock        -> checkout simulado por el propio sitio (demo sin cuenta).
-  //   mercadopago -> Checkout Pro real; requiere MP_ACCESS_TOKEN (token de PRUEBA TEST-…).
-  PASARELA_MODO: z.enum(["manual", "mock", "mercadopago"]).default("manual"),
-  MP_ACCESS_TOKEN: z.string().default(""),
+  // Usuario del bot de Telegram (sin @). El sitio manda al paciente a
+  // t.me/<usuario>?start=pago_<uuid> para enviar el comprobante de pago.
+  TELEGRAM_BOT_USERNAME: z.string().default("FisioLiiBot"),
 
   // Límites defensivos de la superficie HTTP.
   CORE_API_MAX_BODY_BYTES: z.coerce.number().int().min(256).max(1_048_576).default(16_384),

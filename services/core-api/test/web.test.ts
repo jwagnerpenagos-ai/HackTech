@@ -2,11 +2,8 @@ import { describe, it, expect } from "vitest";
 import { crearDbFalsa } from "./fakeDb.js";
 import { codigoDeSlug, slugDeCodigo } from "../src/web/slugs.js";
 import { firmarToken, verificarToken } from "../src/web/token.js";
-import { listarServiciosWeb, disponibilidadWeb, crearReservaWeb, resolverPagoMock } from "../src/web/publico.js";
-import { crearCheckout, type Pasarela } from "../src/web/pasarela.js";
-
-const P_MANUAL: Pasarela = { modo: "manual", activa: false, accessToken: "", sitioUrl: "http://localhost:3000" };
-const P_MOCK: Pasarela = { modo: "mock", activa: true, accessToken: "", sitioUrl: "http://localhost:3000" };
+import { listarServiciosWeb, disponibilidadWeb, crearReservaWeb } from "../src/web/publico.js";
+import { iniciarPagoWeb } from "../src/dominio/pagos.js";
 
 describe("web/slugs", () => {
   it("traduce slug <-> codigo en ambos sentidos", () => {
@@ -63,60 +60,48 @@ describe("web/publico", () => {
     expect(r[0]).toMatch(/^\d{2}:\d{2}$/);
   });
 
-  it("crearReservaWeb: reserva repetida con misma Idempotency-Key devuelve la misma", async () => {
+  it("crearReservaWeb: reserva repetida con misma Idempotency-Key devuelve la misma + enlace a Telegram", async () => {
     const { db } = crearDbFalsa([
-      [{ id: 77, estado: "pendiente_pago" }], // SELECT ... WHERE creado_por (idempotencia: ya existe)
-      [{ valor_total: "100000.00", moneda: "COP", pago_ref: null }], // compra ligada
+      [{ id: 77, uuid: "11111111-1111-1111-1111-111111111111", estado: "pendiente_pago" }], // idempotencia: ya existe
+      [{ valor_total: "100000.00", moneda: "COP" }], // compra ligada
     ]);
-    const r = await crearReservaWeb(db, P_MANUAL, {
+    const r = await crearReservaWeb(db, "FisioLiiBot", {
       slug: "valoracion-inicial", sedeCodigo: "TUNJA", fecha: "2026-12-01", hora: "09:00",
       paciente: { nombre: "Ana Torres" }, idempotencyKey: "clave-repetida-123",
     });
     expect(r).toMatchObject({ reservaId: 77, estado: "pendiente_pago", monto: 100000 });
-    expect(r.checkoutUrl).toBeUndefined();
+    expect(r.telegramPago).toBe(
+      "https://t.me/FisioLiiBot?start=pago_11111111-1111-1111-1111-111111111111",
+    );
   });
 });
 
-describe("web/pasarela", () => {
-  it("crearCheckout en manual devuelve null", async () => {
-    expect(
-      await crearCheckout(P_MANUAL, { referencia: "FISIO-9-abcd", monto: 100000, moneda: "COP", descripcion: "x" }),
-    ).toBeNull();
-  });
-
-  it("crearCheckout en mock apunta al checkout simulado del sitio", async () => {
-    const url = await crearCheckout(P_MOCK, {
-      referencia: "FISIO-9-abcd1234",
-      monto: 100000,
-      moneda: "COP",
-      descripcion: "Valoración inicial",
-    });
-    expect(url).toContain("http://localhost:3000/reservar/pago-simulado?");
-    expect(url).toContain("ref=FISIO-9-abcd1234");
-    expect(url).toContain("monto=100000");
-  });
-});
-
-describe("resolverPagoMock", () => {
-  it("aprobar verifica el pago", async () => {
+describe("iniciarPagoWeb", () => {
+  it("busca la reserva por uuid, vincula el chat y devuelve los datos del pago", async () => {
     const { db, llamadas } = crearDbFalsa([
-      [{ id: 5, estado: "registrado", reserva_id: 42 }], // SELECT pago por referencia
-      [], // verificar_pago (SELECT comercial.verificar_pago)
-      [], // SELECT reservas confirmadas (dentro de verificarPago)
+      [
+        {
+          id: 42,
+          estado: "pendiente_pago",
+          compra_id: 9,
+          paciente_id: 5,
+          valor_total: "100000.00",
+          moneda: "COP",
+          servicio: "Valoración inicial",
+          inicia_en: "2026-12-01T14:00:00.000Z",
+        },
+      ],
+      [], // INSERT vinculo_telegram ON CONFLICT DO NOTHING
     ]);
-    const r = await resolverPagoMock(db, "FISIO-42-abcd1234", true);
-    expect(r).toEqual({ estado: "aprobado", reservaId: 42 });
-    expect(llamadas.some((l) => l.texto.includes("comercial.verificar_pago"))).toBe(true);
+    const r = await iniciarPagoWeb(db, { reservaUuid: "11111111-1111-1111-1111-111111111111", chatId: 999 });
+    expect(r).toMatchObject({ encontrada: true, reservaId: 42, compraId: 9, monto: 100000, estado: "pendiente_pago" });
+    expect(llamadas.some((l) => l.texto.includes("personas.vinculo_telegram"))).toBe(true);
   });
 
-  it("rechazar marca el pago rechazado", async () => {
-    const { db, llamadas } = crearDbFalsa([
-      [{ id: 5, estado: "registrado", reserva_id: 42 }],
-      [{ compra_id: 9 }], // UPDATE comercial.pago ... RETURNING compra_id (rechazarPago)
-      [], // SELECT datos de la reserva (rechazarPago)
-    ]);
-    const r = await resolverPagoMock(db, "FISIO-42-abcd1234", false);
-    expect(r.estado).toBe("rechazado");
-    expect(llamadas.some((l) => l.texto.includes("estado = 'rechazado'"))).toBe(true);
+  it("uuid inexistente -> 404", async () => {
+    const { db } = crearDbFalsa([[]]);
+    await expect(
+      iniciarPagoWeb(db, { reservaUuid: "22222222-2222-2222-2222-222222222222", chatId: 1 }),
+    ).rejects.toMatchObject({ codigo: "no_encontrado" });
   });
 });

@@ -70,36 +70,24 @@ mandarlo y la API lo ignora sin fallar.
 
 Respuesta `201`:
 ```json
-{ "reservaId": 42, "referencia": "FISIO-…", "estado": "pendiente_pago",
-  "monto": 100000, "moneda": "COP", "nequi": "3113981422",
-  "checkoutUrl": "https://www.mercadopago.com.co/checkout/v1/redirect?...",
-  "referenciaPago": "FISIO-42-9d66beac" }
+{ "reservaId": 42, "reservaUuid": "…-uuid", "referencia": "FISIO-…",
+  "estado": "pendiente_pago", "monto": 100000, "moneda": "COP",
+  "nequi": "3113981422",
+  "telegramPago": "https://t.me/FisioLiiBot?start=pago_<reservaUuid>" }
 ```
-La cita nace `pendiente_pago`. **Tres modos según `PASARELA_MODO`:**
-- **`mercadopago`** (con `MP_ACCESS_TOKEN`, usar el token de PRUEBA `TEST-…`
-  de developers.mercadopago.com): el backend crea una preferencia de Checkout
-  Pro con `external_reference` = la referencia del pago y devuelve
-  `checkoutUrl` (`sandbox_init_point`). Al volver, Mercado Pago agrega
-  `payment_id` y `status` a la `back_url`; el sitio llama
-  `GET /api/pagos/estado?ref=…&payment_id=…` y, si el pago quedó `approved`,
-  la cita se confirma sola (`comercial.verificar_pago`).
-- **`mock`**: `checkoutUrl` apunta a `/reservar/pago-simulado` del propio
-  sitio — un checkout de demo con botones Aprobar/Rechazar que llaman
-  `POST /api/pagos/mock`. Misma confirmación automática. Para demo sin cuenta.
-- **`manual`** (por defecto): no viene `checkoutUrl`. Pago por Nequi; Lina
-  confirma desde el panel.
+La cita nace `pendiente_pago`. **No hay pasarela de pago**: el paciente
+transfiere por Nequi y envía el comprobante por Telegram — el sitio muestra
+un botón a `telegramPago`. Ese enlace abre el bot con el payload
+`pago_<reservaUuid>`; el bot lo reconoce (`/start`), pide la foto del
+comprobante y sigue el flujo de pagos que ya existe (`/pagos` del staff →
+`comercial.verificar_pago` → cita `confirmada`). Alternativa: Lina confirma
+la cita a mano desde el panel.
 
-### `POST /api/pagos/mock` — solo con `PASARELA_MODO=mock`
-Body `{ "referencia": "<referenciaPago>", "aprobar": true|false }`. Verifica o
-rechaza el pago. `404` si el modo no es `mock`.
-
-### `GET /api/pagos/estado?ref=<referenciaPago>` · `&payment_id=<id de Mercado Pago>`
-Consulta el estado del pago al volver del checkout. `ref` es obligatorio.
-```json
-{ "estado": "aprobado" | "rechazado" | "pendiente" | "manual", "reservaId": 42 }
-```
-`aprobado` = pago verificado y cita confirmada. `pendiente` = todavía sin
-resolver (el sitio reintenta). `manual` = no hay pasarela configurada.
+### `POST /pagos/web/iniciar` — interno (lo llama el bot, guard `X-Internal-Key`)
+Body `{ "reserva_uuid": "<uuid>", "chat_id": <n> }`. Busca la reserva por su
+uuid público, vincula ese chat de Telegram al paciente si aún no lo está, y
+devuelve `{ encontrada, estado, reservaId, compraId, monto, moneda, servicio, iniciaEn }`.
+`404` si el uuid no existe.
 
 Errores: `409 cupo_ocupado` (ese horario ya se tomó), `422 anticipacion_insuficiente`
 (menos de 24 h), `422 valoracion_requerida` (paciente conocido sin valoración

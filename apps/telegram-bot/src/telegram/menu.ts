@@ -14,10 +14,11 @@ import {
   miId,
 } from "../commands.js";
 import { estadoInicial } from "../conversation.js";
-import { formatearResultado } from "../resultados.js";
+import { fechaLarga, formatearResultado, horaCorta } from "../resultados.js";
 import { InlineKeyboard } from "grammy";
 import type { FlujoDeps, MiContexto } from "./contexto.js";
 import { citasCancelablesDeResultado } from "./parsers.js";
+import { formatearMonto, LLAVE_NEQUI } from "./formato.js";
 import { tecladoDe } from "./teclados.js";
 import { iniciarReservaGuiada } from "./flujoReserva.js";
 import { iniciarCancelarGuiado } from "./flujoCancelar.js";
@@ -57,6 +58,40 @@ export function registrarMenu(bot: Bot<MiContexto>, deps: FlujoDeps): void {
   };
 
   bot.command("start", async (ctx) => {
+    // Deep-link desde el sitio web: /start pago_<uuid de la reserva>. El
+    // paciente viene a enviar el comprobante de una cita reservada en la web.
+    const m = /^pago_([0-9a-fA-F-]{36})$/.exec(ctx.match);
+    if (m?.[1]) {
+      const r = await deps.cApi.iniciarPagoWeb(deps.cfg, { reservaUuid: m[1], chatId: ctx.chat.id });
+      if (!r.ok) {
+        await ctx.reply("No pude encontrar esa reserva. Si el enlace es viejo, vuelva a reservar en el sitio.");
+        return;
+      }
+      const d = r.datos;
+      if (d.estado !== "pendiente_pago" || d.compraId === null || d.monto === null) {
+        const txt =
+          d.estado === "confirmada"
+            ? "Esa cita ya está confirmada. ✅"
+            : `Esa reserva está en estado "${d.estado}", no tiene un pago pendiente.`;
+        ctx.session = estadoInicial();
+        await ctx.reply(txt);
+        return;
+      }
+      ctx.session = {
+        ...estadoInicial(),
+        esperandoComprobante: { reservaId: d.reservaId, compraId: d.compraId, monto: d.monto },
+      };
+      await ctx.reply(
+        [
+          `Reserva recibida: ${d.servicio ?? "su cita"} — ${fechaLarga(d.iniciaEn.slice(0, 10))} · ${horaCorta(d.iniciaEn)}.`,
+          "",
+          `Para confirmarla, transfiera ${formatearMonto(d.monto)} a la Llave Nequi ${LLAVE_NEQUI}`,
+          "y envíeme aquí la foto del comprobante.",
+        ].join("\n"),
+      );
+      return;
+    }
+
     ctx.session = estadoInicial();
     await ctx.reply(inicio(nivelDeAcceso(cfg, ctx.chat.id)), { reply_markup: tecladoDe(MENU_ACCIONES) });
   });

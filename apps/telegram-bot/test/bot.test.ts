@@ -166,6 +166,20 @@ function coreApiDePrueba() {
           chatId: "500",
         },
       }),
+    iniciarPagoWeb: () =>
+      Promise.resolve({
+        ok: true,
+        datos: {
+          encontrada: true,
+          estado: "pendiente_pago",
+          reservaId: 77,
+          compraId: 55,
+          monto: 100000,
+          moneda: "COP",
+          servicio: "Valoración inicial",
+          iniciaEn: "2026-11-18T15:00:00.000Z",
+        },
+      }),
   };
   return { coreApi, registrados };
 }
@@ -174,6 +188,9 @@ let updateId = 0;
 function updateTexto(text: string, chatId: number): Update {
   updateId += 1;
   const esComando = text.startsWith("/");
+  // La entidad bot_command cubre solo el token del comando, no los argumentos
+  // (así lo manda Telegram; si no, ctx.match / bot.command no funcionan).
+  const cmdLen = text.split(/\s/, 1)[0]?.length ?? text.length;
   const update = {
     update_id: updateId,
     message: {
@@ -183,7 +200,7 @@ function updateTexto(text: string, chatId: number): Update {
       from: { id: chatId, is_bot: false, first_name: "Persona" },
       text,
       ...(esComando
-        ? { entities: [{ type: "bot_command", offset: 0, length: text.length }] }
+        ? { entities: [{ type: "bot_command", offset: 0, length: cmdLen }] }
         : {}),
     },
   };
@@ -639,6 +656,17 @@ describe("bot (integración)", () => {
     await bot.handleUpdate(updateFoto("AABBCC", 500));
     expect(registrados).toEqual([{ compraId: 55, comprobanteRef: "AABBCC" }]);
     expect(enviados.at(-1)).toContain("Recibí su comprobante");
+  });
+
+  it("deep-link /start pago_<uuid> pide el comprobante y luego lo registra", async () => {
+    const { coreApi, registrados } = coreApiDePrueba();
+    const { bot, enviados } = crearBotDePrueba(undefined, n8nGuiado, coreApi);
+
+    await bot.handleUpdate(updateTexto("/start pago_11111111-1111-1111-1111-111111111111", 500));
+    expect(enviados.at(-1)).toContain("foto del comprobante");
+
+    await bot.handleUpdate(updateFoto("WEBPAGO", 500));
+    expect(registrados).toEqual([{ compraId: 55, comprobanteRef: "WEBPAGO" }]);
   });
 
   it("staff verifica un pago y el paciente recibe la confirmación", async () => {

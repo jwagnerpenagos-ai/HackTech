@@ -154,6 +154,20 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
     );
   });
 
+  // Arranque del pago por Telegram para una reserva hecha en el sitio web:
+  // el bot llama acá con el uuid del deep-link y su chat_id.
+  const IniciarPagoWebBody = z.object({
+    reserva_uuid: z.string().uuid(),
+    chat_id: z.coerce.number().int(),
+  });
+  app.post("/pagos/web/iniciar", async (req, reply) => {
+    const b = IniciarPagoWebBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () =>
+      pagos.iniciarPagoWeb(db, { reservaUuid: b.data.reserva_uuid, chatId: b.data.chat_id }),
+    );
+  });
+
   // --- Registro de asistencia por el staff (ver dominio/asistencia.ts) ---
   // También fuera de /comandos: operación interna que "cierra" la cita.
   const AsistenciaBody = z.object({

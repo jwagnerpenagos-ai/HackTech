@@ -99,20 +99,14 @@ export interface PacienteReservaApi {
 
 export interface ReservaCreadaApi {
   reservaId: number;
+  reservaUuid: string;
   referencia: string;
   estado: string;
   monto: number | null;
   moneda: string | null;
   nequi: string;
-  expiraEn?: string;
-  /** Si viene, hay pasarela: el sitio debe redirigir acá para pagar. */
-  checkoutUrl?: string;
-  referenciaPago?: string;
-}
-
-export interface EstadoPagoApi {
-  estado: "aprobado" | "rechazado" | "pendiente" | "manual";
-  reservaId: number | null;
+  /** Enlace al bot de Telegram para enviar el comprobante de pago. */
+  telegramPago: string;
 }
 
 export interface CitaAdminApi {
@@ -145,19 +139,6 @@ export const api = {
     input: { servicio: string; sede: string; fecha: string; hora: string; paciente: PacienteReservaApi },
     idempotencyKey: string,
   ) => pedir<ReservaCreadaApi>("/api/reservas", { method: "POST", body: input, idempotencyKey }),
-
-  estadoPago: (params: { ref: string; paymentId?: string }) => {
-    const qs = new URLSearchParams({ ref: params.ref });
-    if (params.paymentId) qs.set("payment_id", params.paymentId);
-    return pedir<EstadoPagoApi>(`/api/pagos/estado?${qs.toString()}`);
-  },
-
-  /** Checkout simulado (PASARELA_MODO=mock): registra la decisión de pago. */
-  pagoMock: (referencia: string, aprobar: boolean) =>
-    pedir<{ estado: string; reservaId: number | null }>("/api/pagos/mock", {
-      method: "POST",
-      body: { referencia, aprobar },
-    }),
 
   // Admin
   login: (usuario: string, clave: string) =>
