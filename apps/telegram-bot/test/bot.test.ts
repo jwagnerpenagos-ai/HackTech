@@ -140,6 +140,32 @@ function coreApiDePrueba() {
         ok: true,
         datos: { reservaId: 99, servicio: "Punción seca", iniciaEn: "2026-11-18T15:00:00.000Z", chatId: "500" },
       }),
+    citasPorAsistir: () =>
+      Promise.resolve({
+        ok: true,
+        datos: {
+          citas: [
+            {
+              reservaId: 99,
+              iniciaEn: "2026-11-18T15:00:00.000Z",
+              servicio: "Valoración inicial",
+              sede: "Sede Tunja",
+              paciente: "Ana Ríos",
+            },
+          ],
+        },
+      }),
+    registrarAsistencia: (_c, p) =>
+      Promise.resolve({
+        ok: true,
+        datos: {
+          reservaId: p.reservaId,
+          estado: p.asistio ? "atendida" : "no_asistio",
+          servicio: "Valoración inicial",
+          iniciaEn: "2026-11-18T15:00:00.000Z",
+          chatId: "500",
+        },
+      }),
   };
   return { coreApi, registrados };
 }
@@ -390,6 +416,7 @@ describe("bot (integración)", () => {
           tipo: "ok",
           datos: {
             registrado: false,
+            valoracionRealizada: false,
             servicios: [
               { nombre: "Valoración inicial", duracionMinMinutos: 60, precio: 100000, moneda: "COP" },
               { nombre: "Punción seca", duracionMinMinutos: 60, precio: 120000, moneda: "COP" },
@@ -631,6 +658,69 @@ describe("bot (integración)", () => {
     const { bot, enviados } = crearBotDePrueba(undefined, n8nGuiado, coreApi);
     await bot.handleUpdate(updateTexto("/pagos", 500)); // no autorizado
     expect(enviados[0]).toContain("solo para el personal");
+  });
+
+  it("staff registra la asistencia y la cita queda atendida", async () => {
+    const { coreApi } = coreApiDePrueba();
+    const { bot, enviados } = crearBotDePrueba(undefined, n8nGuiado, coreApi);
+
+    await bot.handleUpdate(updateTexto("/asistencia", 111)); // staff
+    expect(enviados.some((t) => t.includes("Reserva #99"))).toBe(true);
+
+    await bot.handleUpdate(updateCallback("asis:ok:99", 111));
+    expect(enviados.some((t) => t.includes("asistencia registrada"))).toBe(true);
+  });
+
+  it("/asistencia es solo para el staff", async () => {
+    const { coreApi } = coreApiDePrueba();
+    const { bot, enviados } = crearBotDePrueba(undefined, n8nGuiado, coreApi);
+    await bot.handleUpdate(updateTexto("/asistencia", 500));
+    expect(enviados[0]).toContain("solo para el personal");
+  });
+
+  it("paciente registrado sin valoración atendida: sigue en valoración-only", async () => {
+    const n8n: ClienteN8nPrueba = (_c, intencion, entidades, creadoPor) => {
+      if (intencion === "consultar_catalogo") {
+        return Promise.resolve({
+          tipo: "ok",
+          datos: {
+            registrado: true,
+            valoracionRealizada: false,
+            servicios: [
+              { nombre: "Valoración inicial", duracionMinMinutos: 60, precio: 100000, moneda: "COP" },
+              { nombre: "Punción seca", duracionMinMinutos: 60, precio: 120000, moneda: "COP" },
+            ],
+          },
+        } as ResultadoEjecucion);
+      }
+      return n8nGuiado(_c, intencion, entidades, creadoPor);
+    };
+    const { bot, enviados } = crearBotDePrueba(undefined, n8n);
+    await bot.handleUpdate(updateCallback("menu:agendar", 500));
+    expect(enviados[0]).toContain("valoración inicial todavía no se ha realizado");
+    expect(enviados[0]).not.toContain("Punción seca");
+  });
+
+  it("los servicios no reservables quedan fuera del menú de reserva", async () => {
+    const n8n: ClienteN8nPrueba = (_c, intencion, entidades, creadoPor) => {
+      if (intencion === "consultar_catalogo") {
+        return Promise.resolve({
+          tipo: "ok",
+          datos: {
+            registrado: true,
+            valoracionRealizada: true,
+            servicios: [
+              { nombre: "Valoración inicial", duracionMinMinutos: 60, precio: 100000, moneda: "COP", reservable: true },
+              { nombre: "Prescripción de ejercicio grupal", duracionMinMinutos: 60, precio: 150000, moneda: "COP", reservable: false },
+            ],
+          },
+        } as ResultadoEjecucion);
+      }
+      return n8nGuiado(_c, intencion, entidades, creadoPor);
+    };
+    const { bot, enviados } = crearBotDePrueba(undefined, n8n);
+    await bot.handleUpdate(updateCallback("menu:agendar", 500));
+    expect(enviados.join("\n")).not.toContain("grupal");
   });
 
   it("reserva guiada: sin horarios ese día pide otra fecha", async () => {

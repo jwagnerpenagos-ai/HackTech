@@ -11,6 +11,8 @@ export interface ServicioResumen {
   duracionMin?: number;
   precio?: number | null;
   moneda?: string | null;
+  /** false = no se reserva por el bot (planes grupales/convenios). Ausente = sí. */
+  reservable?: boolean;
 }
 
 /**

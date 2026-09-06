@@ -64,6 +64,12 @@ export interface ServicioConTarifa {
   precio: number | null;
   moneda: string | null;
   sesionesIncluidas: number | null;
+  /**
+   * ¿Se puede reservar por el bot? Solo si tiene una tarifa de sesión
+   * individual (1 sesión, 1 persona). Los planes grupales/convenios no
+   * la tienen: se cotizan aparte y quedan como información, no reservables.
+   */
+  reservable: boolean;
 }
 
 interface FilaServicioTarifa {
@@ -73,6 +79,7 @@ interface FilaServicioTarifa {
   valor_total: string | null;
   moneda: string | null;
   sesiones_incluidas: number | null;
+  reservable: boolean;
 }
 
 /**
@@ -83,7 +90,13 @@ interface FilaServicioTarifa {
 export async function listarServicios(db: Db): Promise<ServicioConTarifa[]> {
   const r = await db.query<FilaServicioTarifa>(
     `SELECT s.nombre, s.duracion_min_minutos, s.duracion_max_minutos,
-            t.valor_total, t.moneda, t.sesiones_incluidas
+            t.valor_total, t.moneda, t.sesiones_incluidas,
+            EXISTS (
+              SELECT 1 FROM catalogo.tarifa ti
+               WHERE ti.servicio_id = s.id AND ti.activo
+                 AND ti.sesiones_incluidas = 1 AND ti.cupo_personas = 1
+                 AND ti.vigencia @> CURRENT_DATE
+            ) AS reservable
        FROM catalogo.servicio s
        LEFT JOIN LATERAL (
          SELECT valor_total, moneda, sesiones_incluidas
@@ -102,6 +115,7 @@ export async function listarServicios(db: Db): Promise<ServicioConTarifa[]> {
     precio: f.valor_total !== null ? Number(f.valor_total) : null,
     moneda: f.moneda,
     sesionesIncluidas: f.sesiones_incluidas,
+    reservable: f.reservable,
   }));
 }
 

@@ -77,6 +77,29 @@ export async function resolverPorChatId(db: Db, chatId: number): Promise<Resulta
 }
 
 /**
+ * ¿Este paciente ya ASISTIÓ a una valoración inicial? No basta con haberla
+ * reservado o pagado: la regla del consultorio es que solo después de la
+ * consulta de valoración se habilitan los demás servicios. Una inasistencia
+ * (`no_asistio`) cuenta como realizada, igual que en la política de cancelación.
+ */
+export async function tieneValoracionAtendida(db: Db, pacienteId: number): Promise<boolean> {
+  const r = await db.query<{ existe: boolean }>(
+    `SELECT EXISTS (
+        SELECT 1
+          FROM agenda.reserva r
+          JOIN agenda.reserva_participante rp ON rp.reserva_id = r.id
+          JOIN catalogo.servicio s ON s.id = r.servicio_id
+         WHERE rp.paciente_id = $1
+           AND r.tipo = 'cita'
+           AND s.codigo = 'VALORACION'
+           AND r.estado IN ('atendida', 'no_asistio')
+     ) AS existe`,
+    [pacienteId],
+  );
+  return r.rows[0]?.existe === true;
+}
+
+/**
  * Primera cita: crea el paciente y su vínculo con el chat en una sola
  * transacción, para no dejar un chat "a medio registrar" si algo falla.
  * `nombreCompleto` se parte en nombres/apellidos por el primer espacio; sin

@@ -29,6 +29,24 @@ const ReservaConfirmada = z.object({
 });
 export type ReservaConfirmada = z.infer<typeof ReservaConfirmada>;
 
+const CitaPorAsistir = z.object({
+  reservaId: z.number(),
+  iniciaEn: z.string(),
+  servicio: z.string().nullable(),
+  sede: z.string().nullable(),
+  paciente: z.string(),
+});
+export type CitaPorAsistir = z.infer<typeof CitaPorAsistir>;
+
+const AsistenciaRegistrada = z.object({
+  reservaId: z.number(),
+  estado: z.string(),
+  servicio: z.string().nullable(),
+  iniciaEn: z.string(),
+  chatId: z.string().nullable(),
+});
+export type AsistenciaRegistrada = z.infer<typeof AsistenciaRegistrada>;
+
 const RespuestaOk = z.object({ ok: z.literal(true), datos: z.unknown() });
 
 export type ResultadoCoreApi<T> = { ok: true; datos: T } | { ok: false; motivo: "red" | "http" | "respuesta_invalida" };
@@ -68,6 +86,11 @@ export interface ClienteCoreApi {
     cfg: Config,
     p: { pagoId: number; por: string; motivo?: string },
   ): Promise<ResultadoCoreApi<{ reservaId: number | null; servicio: string | null; iniciaEn: string | null; chatId: string | null }>>;
+  citasPorAsistir(cfg: Config): Promise<ResultadoCoreApi<{ citas: CitaPorAsistir[] }>>;
+  registrarAsistencia(
+    cfg: Config,
+    p: { reservaId: number; asistio: boolean; por: string },
+  ): Promise<ResultadoCoreApi<AsistenciaRegistrada>>;
 }
 
 export const coreApi: ClienteCoreApi = {
@@ -106,6 +129,18 @@ export const coreApi: ClienteCoreApi = {
         chatId: z.string().nullable(),
       })
       .safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async citasPorAsistir(cfg) {
+    const r = await pedir(cfg, "/citas/por-asistir");
+    if (!r.ok) return r;
+    const d = z.object({ citas: z.array(CitaPorAsistir) }).safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async registrarAsistencia(cfg, p) {
+    const r = await pedir(cfg, "/asistencia", { reserva_id: p.reservaId, asistio: p.asistio, por: p.por });
+    if (!r.ok) return r;
+    const d = AsistenciaRegistrada.safeParse(r.datos);
     return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
   },
 };

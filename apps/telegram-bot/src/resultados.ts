@@ -30,6 +30,7 @@ interface ServicioConTarifa {
   duracionMinMinutos?: number;
   precio?: number | null;
   moneda?: string | null;
+  reservable?: boolean;
 }
 
 const TZ_BOGOTA = "America/Bogota";
@@ -100,7 +101,13 @@ function formatearExito(intencion: string, datos: unknown): string {
       const servicios = d["servicios"] as ServicioConTarifa[] | undefined;
       return listaOVacio(
         servicios,
-        (s) => `${s.nombre ?? "?"} (${s.duracionMinMinutos ?? "?"} min) — ${precioTexto(s.precio, s.moneda)}`,
+        (s) => {
+          const cola =
+            s.reservable === false
+              ? "planes por persona — consúltenos al 311 398 1422"
+              : precioTexto(s.precio, s.moneda);
+          return `${s.nombre ?? "?"} (${s.duracionMinMinutos ?? "?"} min) — ${cola}`;
+        },
         "No hay servicios para mostrar.",
       );
     }

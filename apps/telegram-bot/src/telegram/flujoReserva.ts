@@ -24,6 +24,7 @@ import {
   proximosDeResultado,
   serviciosDeCatalogo,
   estaRegistrado,
+  valoracionRealizada,
 } from "./parsers.js";
 import {
   RSV_CANCELAR,
@@ -125,7 +126,9 @@ export async function iniciarReservaGuiada(
 ): Promise<void> {
   const chatId = ctx.chat?.id ?? 0;
   const catalogo = await deps.n8n(deps.cfg, "consultar_catalogo", {}, String(chatId));
-  const servicios = serviciosDeCatalogo(catalogo);
+  // Solo los servicios reservables por el bot: los planes grupales/convenios
+  // quedan en el catálogo como información, pero no en el menú de reserva.
+  const servicios = serviciosDeCatalogo(catalogo).filter((s) => s.reservable !== false);
   if (servicios.length === 0) {
     await ctx.reply("No pude cargar los servicios en este momento. Intente de nuevo en un rato.");
     return;
@@ -133,16 +136,17 @@ export async function iniciarReservaGuiada(
 
   ctx.session = { ...estadoInicial(), reservaFlujo: { paso: "slot", servicios } };
 
-  // Paciente nuevo (sin vínculo en la base): solo puede agendar la valoración inicial.
+  // Hasta que el paciente asista a su valoración inicial, solo puede agendar
+  // esa consulta (sea un chat nuevo o uno que ya reservó la valoración pero
+  // todavía no la hizo).
   const val = servicios.find((s) => RE_VALORACION.test(s.nombre)) ?? servicios[0];
-  if (!estaRegistrado(catalogo) && val !== undefined) {
-    await mostrarProximos(
-      ctx,
-      deps,
-      val.nombre,
-      `Como es su primera cita con nosotros, agendamos una Valoración inicial (${etiquetaServicio(val)}).\n` +
-        "Después de esa consulta podrá reservar cualquiera de los demás servicios.\n\n",
-    );
+  if (!valoracionRealizada(catalogo) && val !== undefined) {
+    const prefacio = estaRegistrado(catalogo)
+      ? "Su valoración inicial todavía no se ha realizado. Cuando asista a esa consulta se habilitan los demás servicios.\n" +
+        `Por ahora puedo agendarle la Valoración inicial (${etiquetaServicio(val)}).\n\n`
+      : `Como es su primera cita con nosotros, agendamos una Valoración inicial (${etiquetaServicio(val)}).\n` +
+        "Después de esa consulta podrá reservar cualquiera de los demás servicios.\n\n";
+    await mostrarProximos(ctx, deps, val.nombre, prefacio);
     return;
   }
 

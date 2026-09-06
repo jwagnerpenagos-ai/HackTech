@@ -165,16 +165,24 @@ export async function ejecutarComando(
     switch (intencion) {
       case "consultar_catalogo": {
         const servicios = await catalogo.listarServicios(db);
-        // `registrado` le dice al bot si este chat ya es paciente: si no lo es,
-        // solo puede reservar la valoración inicial (se filtra del lado del bot).
-        // La lista SIEMPRE va completa: es información, no una restricción.
+        // Dos señales para el bot (la lista SIEMPRE va completa: es información):
+        //  - `registrado`: el chat ya está vinculado a un paciente.
+        //  - `valoracionRealizada`: además ya asistió a su valoración inicial.
+        //    Hasta que eso pase, el bot solo ofrece la valoración inicial.
         const chatId = Number(ctx.creadoPor);
         let registrado = true;
+        let valoracionRealizada = true;
         if (ctx.esAdmin !== true && Number.isSafeInteger(chatId)) {
           const identidad = await pacientes.resolverPorChatId(db, chatId);
-          registrado = identidad.tipo === "conocido";
+          if (identidad.tipo === "conocido") {
+            registrado = true;
+            valoracionRealizada = await pacientes.tieneValoracionAtendida(db, identidad.paciente.id);
+          } else {
+            registrado = false;
+            valoracionRealizada = false;
+          }
         }
-        return { ok: true, datos: { servicios, registrado } };
+        return { ok: true, datos: { servicios, registrado, valoracionRealizada } };
       }
 
       case "consultar_agenda": {
@@ -287,6 +295,18 @@ export async function ejecutarComando(
           const identidad = await pacientes.resolverPorChatId(db, chatId);
           if (identidad.tipo === "conocido") {
             paciente = identidad.paciente;
+            // Ya es paciente, pero si todavía no asistió a su valoración
+            // inicial solo puede reservar esa consulta, nada más.
+            if (
+              !RE_VALORACION_INICIAL.test(servicio.nombre) &&
+              !(await pacientes.tieneValoracionAtendida(db, paciente.id))
+            ) {
+              return errorComando(
+                "valoracion_requerida",
+                "Su valoración inicial todavía no se ha realizado. Cuando asista a esa consulta podrá reservar los demás servicios.",
+                422,
+              );
+            }
           } else {
             // Chat sin paciente vinculado = primera cita: solo la valoración inicial.
             if (!RE_VALORACION_INICIAL.test(servicio.nombre)) {

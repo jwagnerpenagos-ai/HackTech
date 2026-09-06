@@ -13,6 +13,7 @@ import { registrarMenu } from "./telegram/menu.js";
 import { registrarFlujoReserva } from "./telegram/flujoReserva.js";
 import { registrarFlujoCancelar } from "./telegram/flujoCancelar.js";
 import { registrarFlujoPagos } from "./telegram/flujoPagos.js";
+import { registrarFlujoAsistencia } from "./telegram/flujoAsistencia.js";
 import { registrarDispatcher } from "./telegram/dispatcher.js";
 
 export interface DepsBot {
@@ -77,6 +78,7 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
 
   registrarMenu(bot, flujoDeps);
   registrarFlujoPagos(bot, flujoDeps);
+  registrarFlujoAsistencia(bot, flujoDeps);
   registrarFlujoReserva(bot, flujoDeps);
   registrarFlujoCancelar(bot, flujoDeps);
   registrarDispatcher(bot, flujoDeps);

@@ -63,6 +63,7 @@ export function serviciosDeCatalogo(resultado: ResultadoEjecucion): ServicioResu
         ...(typeof o["duracionMinMinutos"] === "number" ? { duracionMin: o["duracionMinMinutos"] } : {}),
         precio: typeof o["precio"] === "number" ? o["precio"] : null,
         moneda: typeof o["moneda"] === "string" ? o["moneda"] : null,
+        reservable: o["reservable"] !== false,
       },
     ];
   });
@@ -73,6 +74,17 @@ export function estaRegistrado(resultado: ResultadoEjecucion): boolean {
   const d = datosObjeto(resultado);
   if (d === null) return true;
   return d["registrado"] !== false;
+}
+
+/**
+ * ¿El paciente ya asistió a su valoración inicial? Hasta que sea `true` el bot
+ * solo ofrece la valoración inicial. Por defecto `true` (admin/web/forma
+ * inesperada no tienen esta restricción).
+ */
+export function valoracionRealizada(resultado: ResultadoEjecucion): boolean {
+  const d = datosObjeto(resultado);
+  if (d === null) return true;
+  return d["valoracionRealizada"] !== false;
 }
 
 export function disponibilidadDeResultado(resultado: ResultadoEjecucion): { sede: string; horas: string[] } {

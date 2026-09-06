@@ -28,8 +28,20 @@ describe("ejecutarComando", () => {
     const r = await ejecutarComando(db, "consultar_catalogo", {}, { creadoPor: "555" });
     expect(r.ok).toBe(true);
     expect((r.datos as { registrado: boolean }).registrado).toBe(false);
+    expect((r.datos as { valoracionRealizada: boolean }).valoracionRealizada).toBe(false);
     // La lista igual va completa: es información.
     expect((r.datos as { servicios: unknown[] }).servicios).toHaveLength(1);
+  });
+
+  it("consultar_catalogo: chat conocido con valoración atendida marca valoracionRealizada=true", async () => {
+    const { db } = crearDbFalsa([
+      [{ nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45, valor_total: "80000.00", moneda: "COP", reservable: true }],
+      [{ id: 5, nombre_completo: "Laura Gómez", telefono: null, email: null }], // resolverPorChatId: conocido
+      [{ existe: true }], // tieneValoracionAtendida
+    ]);
+    const r = await ejecutarComando(db, "consultar_catalogo", {}, { creadoPor: "555" });
+    expect(r.ok).toBe(true);
+    expect(r.datos).toMatchObject({ registrado: true, valoracionRealizada: true });
   });
 
   it("consultar_agenda de un chat no-admin desconocido devuelve vacío sin filtrar por sede/fecha", async () => {
@@ -163,6 +175,7 @@ describe("ejecutarComando", () => {
       [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
       TARIFA,
       [{ id: 5, nombre_completo: "Laura Gómez", telefono: "3001234567", email: null }], // resolverPorChatId
+      [{ existe: true }], // tieneValoracionAtendida
       [{ id: 2, nombre: "Turmequé" }],
       [{ crear_reserva: 77 }],
       ...COLA_CREAR,
@@ -200,6 +213,7 @@ describe("ejecutarComando", () => {
       [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
       TARIFA,
       [{ id: 5, nombre_completo: "Laura Gómez", telefono: "3001234567", email: null }], // resolverPorChatId
+      [{ existe: true }], // tieneValoracionAtendida
       [{ id: 1, nombre: "Tunja" }],
       [{ crear_reserva: 77 }],
       ...COLA_CREAR,
@@ -214,6 +228,23 @@ describe("ejecutarComando", () => {
       ok: true,
       datos: { reservaId: 77, compraId: 500, montoTotal: 120000, moneda: "COP", pacienteId: 5 },
     });
+  });
+
+  it("crear_sesion de un chat conocido SIN valoración atendida rechaza otros servicios", async () => {
+    const { db } = crearDbFalsa([
+      [{ id: 3, nombre: "Punción Seca", duracion_min_minutos: 30, duracion_max_minutos: 45 }],
+      TARIFA,
+      [{ id: 5, nombre_completo: "Laura Gómez", telefono: "3001234567", email: null }], // resolverPorChatId
+      [{ existe: false }], // tieneValoracionAtendida
+    ]);
+    const r = await ejecutarComando(
+      db,
+      "crear_sesion",
+      { servicio: "Punción", sede: "Tunja", ...FECHA_HABIL },
+      { creadoPor: "111" },
+    );
+    expect(r.ok).toBe(false);
+    expect((r as { error: { codigo: string } }).error.codigo).toBe("valoracion_requerida");
   });
 
   it("crear_sesion rechaza citas con menos de 24 h de anticipación", async () => {

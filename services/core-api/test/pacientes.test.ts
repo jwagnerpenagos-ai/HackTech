@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { crearDbFalsa } from "./fakeDb.js";
-import { buscarPaciente, resolverPorChatId, crearPacienteConVinculo } from "../src/dominio/pacientes.js";
+import {
+  buscarPaciente,
+  resolverPorChatId,
+  crearPacienteConVinculo,
+  tieneValoracionAtendida,
+} from "../src/dominio/pacientes.js";
 
 describe("dominio/pacientes", () => {
   it("un solo resultado → tipo unico", async () => {
@@ -78,5 +83,19 @@ describe("crearPacienteConVinculo", () => {
     const { db, llamadas } = crearDbFalsa([[{ id: 43 }], []]);
     await crearPacienteConVinculo(db, { nombreCompleto: "Laura", telefono: "3001234567", chatId: 222 });
     expect(llamadas[0]?.valores).toEqual(["Laura", "Laura", "3001234567", null]);
+  });
+});
+
+describe("tieneValoracionAtendida", () => {
+  it("true cuando existe una valoración atendida (o inasistencia)", async () => {
+    const { db, llamadas } = crearDbFalsa([[{ existe: true }]]);
+    expect(await tieneValoracionAtendida(db, 5)).toBe(true);
+    expect(llamadas[0]?.valores).toEqual([5]);
+    expect(llamadas[0]?.texto).toContain("'VALORACION'");
+  });
+
+  it("false cuando no existe", async () => {
+    const { db } = crearDbFalsa([[{ existe: false }]]);
+    expect(await tieneValoracionAtendida(db, 5)).toBe(false);
   });
 });

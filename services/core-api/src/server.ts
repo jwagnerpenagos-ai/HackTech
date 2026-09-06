@@ -9,6 +9,7 @@ import { ComandoSchema } from "./contract/comando.js";
 import { ejecutarComando } from "./comandos.js";
 import { ErrorDominio } from "./errores.js";
 import * as pagos from "./dominio/pagos.js";
+import * as asistencia from "./dominio/asistencia.js";
 
 /** Comparación de tiempo constante entre el header y el secreto esperado. */
 function claveValida(recibida: string | undefined, esperada: string): boolean {
@@ -146,6 +147,30 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
     if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
     return conDominio(reply, () =>
       pagos.rechazarPago(db, { pagoId: b.data.pago_id, por: b.data.por ?? null, motivo: b.data.motivo ?? null }),
+    );
+  });
+
+  // --- Registro de asistencia por el staff (ver dominio/asistencia.ts) ---
+  // También fuera de /comandos: operación interna que "cierra" la cita.
+  const AsistenciaBody = z.object({
+    reserva_id: z.coerce.number().int().positive(),
+    asistio: z.boolean().default(true),
+    por: z.string().max(120).nullish(),
+  });
+
+  app.get("/citas/por-asistir", async (_req, reply) =>
+    conDominio(reply, async () => ({ citas: await asistencia.listarCitasPorAsistir(db) })),
+  );
+
+  app.post("/asistencia", async (req, reply) => {
+    const b = AsistenciaBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () =>
+      asistencia.registrarAsistencia(db, {
+        reservaId: b.data.reserva_id,
+        asistio: b.data.asistio,
+        por: b.data.por ?? null,
+      }),
     );
   });
 
