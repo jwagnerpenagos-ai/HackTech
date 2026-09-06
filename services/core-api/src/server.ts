@@ -10,6 +10,7 @@ import { ejecutarComando } from "./comandos.js";
 import { ErrorDominio } from "./errores.js";
 import * as pagos from "./dominio/pagos.js";
 import * as asistencia from "./dominio/asistencia.js";
+import { registrarRutasWeb } from "./web/rutas.js";
 
 /** Comparación de tiempo constante entre el header y el secreto esperado. */
 function claveValida(recibida: string | undefined, esperada: string): boolean {
@@ -34,6 +35,9 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
 
   app.addHook("onRequest", async (req, reply) => {
     if (req.url === "/health" || req.url === "/") return;
+    // La API de navegador (/api/*) tiene su propia autenticación (sesión de
+    // Lina para el panel; nada para lo público). Ver web/rutas.ts.
+    if (req.url.startsWith("/api/")) return;
     if (!cfg.INTERNAL_API_KEY) return; // solo permitido fuera de producción
     const header = req.headers["x-internal-key"];
     const valor = Array.isArray(header) ? header[0] : header;
@@ -173,6 +177,9 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
       }),
     );
   });
+
+  // API de navegador (apps/web). Rutas /api/* con su propia auth.
+  registrarRutasWeb(app, db, cfg);
 
   app.setErrorHandler((err: FastifyError, req, reply) => {
     req.log.error({ err: err.message, code: err.code }, "error no controlado");

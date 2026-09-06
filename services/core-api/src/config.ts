@@ -27,6 +27,16 @@ const EnvSchema = z.object({
 
   TIMEZONE: z.string().min(1).default("America/Bogota"),
 
+  // --- API de navegador (apps/web) ---
+  // Sesión de un solo usuario (Lina): estas credenciales autorizan el panel.
+  // Vacías = el panel admin queda deshabilitado (login siempre 401).
+  WEB_ADMIN_USUARIO: z.string().default(""),
+  WEB_ADMIN_CLAVE: z.string().default(""),
+  // Secreto para firmar el token de sesión del panel. Si falta, se genera
+  // uno efímero al arrancar (los tokens no sobreviven un reinicio).
+  WEB_SESSION_SECRET: z.string().min(16).optional(),
+  WEB_TOKEN_TTL_MIN: z.coerce.number().int().min(5).max(1440).default(480),
+
   // Límites defensivos de la superficie HTTP.
   CORE_API_MAX_BODY_BYTES: z.coerce.number().int().min(256).max(1_048_576).default(16_384),
   CORE_API_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(120),
