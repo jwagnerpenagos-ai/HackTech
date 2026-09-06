@@ -1,0 +1,442 @@
+@import "tailwindcss";
+
+:root {
+  /* Escala de marca (nueva paleta azul, más profunda y con gradientes) */
+  --color-brand-50: #f0f7ff;
+  --color-brand-100: #e0effe;
+  --color-brand-200: #bae0fd;
+  --color-brand-300: #7cc8fc;
+  --color-brand-400: #36affa;
+  --color-brand-500: #0c94eb;
+  --color-brand-600: #0074ca;
+  --color-brand-700: #015da7;
+  --color-brand-800: #064f8a;
+  --color-brand-900: #0b4272;
+  --color-brand-950: #072a4b;
+
+  /* Tokens semánticos que ya usan los componentes -- se remapean a la
+     escala de marca, así todo el sitio hereda la paleta nueva sin tener
+     que tocar cada archivo. */
+  --color-white: #ffffff;
+  --color-mist: var(--color-brand-50);
+  --color-sky-100: var(--color-brand-100);
+  --color-sky-300: var(--color-brand-300);
+  --color-azure-500: var(--color-brand-500);
+  --color-deep-600: var(--color-brand-700);
+  --color-deep-700: var(--color-brand-900);
+  --color-ink-900: #0f172a;   /* slate-900, texto de cuerpo */
+  --color-ink-600: #45596b;   /* texto muted con tinte azul */
+
+  --font-space-grotesk: "Space Grotesk", sans-serif;
+  --font-jakarta: "Plus Jakarta Sans", sans-serif;
+  --font-display: var(--font-space-grotesk);
+  --font-body: var(--font-jakarta);
+
+  /* Sombra de marca, reutilizada por el sistema de tarjetas */
+  --shadow-card: 0 1px 2px rgb(11 66 114 / 0.04),
+    0 10px 30px -14px rgb(11 66 114 / 0.12);
+  --shadow-card-hover: 0 2px 6px rgb(11 66 114 / 0.06),
+    0 22px 48px -18px rgb(11 66 114 / 0.24);
+}
+
+@theme inline {
+  --color-white: var(--color-white);
+  --color-mist: var(--color-mist);
+  --color-sky-100: var(--color-sky-100);
+  --color-sky-300: var(--color-sky-300);
+  --color-azure-500: var(--color-azure-500);
+  --color-deep-600: var(--color-deep-600);
+  --color-deep-700: var(--color-deep-700);
+  --color-ink-900: var(--color-ink-900);
+  --color-ink-600: var(--color-ink-600);
+
+  --color-brand-50: var(--color-brand-50);
+  --color-brand-100: var(--color-brand-100);
+  --color-brand-200: var(--color-brand-200);
+  --color-brand-300: var(--color-brand-300);
+  --color-brand-400: var(--color-brand-400);
+  --color-brand-500: var(--color-brand-500);
+  --color-brand-600: var(--color-brand-600);
+  --color-brand-700: var(--color-brand-700);
+  --color-brand-800: var(--color-brand-800);
+  --color-brand-900: var(--color-brand-900);
+  --color-brand-950: var(--color-brand-950);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-mist);
+  color: var(--color-ink-900);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+/* Anillo de foco consistente y accesible en todo el sitio */
+:focus-visible {
+  outline: 2px solid var(--color-deep-600);
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------------- */
+  /*  Sistema de layout: ritmo vertical de secciones                 */
+  /* ---------------------------------------------------------------- */
+  .section {
+    padding-block: 4rem;
+  }
+  .section-sm {
+    padding-block: 2.75rem;
+  }
+  .section-lg {
+    padding-block: 5rem;
+  }
+  @media (min-width: 640px) {
+    .section {
+      padding-block: 5.5rem;
+    }
+    .section-sm {
+      padding-block: 3.75rem;
+    }
+    .section-lg {
+      padding-block: 7rem;
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Sistema de tarjetas unificado                                  */
+  /* ---------------------------------------------------------------- */
+  .card {
+    border-radius: 1rem;
+    border: 1px solid var(--color-sky-100);
+    background: var(--color-white);
+    box-shadow: var(--shadow-card);
+  }
+  .card-hover {
+    transition: transform 0.22s ease, box-shadow 0.22s ease,
+      border-color 0.22s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-3px);
+    border-color: var(--color-sky-300);
+    box-shadow: var(--shadow-card-hover);
+  }
+
+  /* Etiqueta pequeña sobre los títulos de sección */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-display);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-deep-600);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Inputs de formulario                                              */
+/* ------------------------------------------------------------------ */
+.fisio-input {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-sky-300);
+  background: var(--color-white);
+  padding: 0.7rem 0.95rem;
+  font-size: 0.95rem;
+  color: var(--color-ink-900);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.fisio-input::placeholder {
+  color: color-mix(in srgb, var(--color-ink-600) 55%, transparent);
+}
+.fisio-input:hover {
+  border-color: var(--color-deep-600);
+}
+.fisio-input:focus {
+  outline: none;
+  border-color: var(--color-deep-600);
+  box-shadow: 0 0 0 4px var(--color-sky-100);
+}
+
+/* Theming del calendario react-day-picker */
+.rdp-fisio {
+  --rdp-accent-color: var(--color-deep-600);
+  --rdp-accent-background-color: var(--color-sky-100);
+  --rdp-today-color: var(--color-deep-600);
+  --rdp-selected-border: none;
+  --rdp-day-width: 2.5rem;
+  --rdp-day-height: 2.5rem;
+  --rdp-day_button-border-radius: 0.6rem;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Utilidades de estilo: gradientes y vidrio esmerilado             */
+/* ------------------------------------------------------------------ */
+.gradient-text {
+  background: linear-gradient(
+    135deg,
+    var(--color-brand-950) 0%,
+    var(--color-brand-600) 55%,
+    var(--color-brand-400) 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gradient-bg {
+  background: linear-gradient(
+    135deg,
+    var(--color-brand-900) 0%,
+    var(--color-brand-600) 100%
+  );
+}
+
+/* Fondo sutil con retícula de puntos para secciones hero */
+.dot-grid {
+  background-image: radial-gradient(
+    var(--color-brand-200) 1px,
+    transparent 1px
+  );
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(
+    ellipse 70% 60% at 50% 40%,
+    #000 0%,
+    transparent 75%
+  );
+  mask-image: radial-gradient(
+    ellipse 70% 60% at 50% 40%,
+    #000 0%,
+    transparent 75%
+  );
+}
+
+.glass-nav {
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Animaciones simples y reutilizables del sitio                     */
+/* ------------------------------------------------------------------ */
+@keyframes ping-slow {
+  0% { transform: scale(0.8); opacity: 0.6; }
+  70% { transform: scale(1.8); opacity: 0; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+.animate-ping-slow {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: ping-slow 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 40s linear infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float {
+  animation: float 5s ease-in-out infinite;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+.animate-pulse-soft {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: pulse-soft 3.5s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out;
+}
+
+@keyframes scroll-hint {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(6px); opacity: 0.5; }
+}
+.animate-scroll-hint {
+  animation: scroll-hint 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin-slow,
+  .animate-float,
+  .animate-pulse-soft,
+  .animate-fade-in,
+  .animate-ping-slow,
+  .animate-scroll-hint {
+    animation: none;
+  }
+}
+
+/* ================================================================== */
+/*  Capa de movimiento — animaciones con intención                    */
+/*  (parallax, olas vivas, dibujado a mano, blobs orgánicos, sheen)   */
+/* ================================================================== */
+
+/* Entrada de página al cambiar de ruta */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-page-in {
+  animation: page-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Olas del WaveDivider: dos capas que derivan en sentidos opuestos */
+@keyframes wave-drift {
+  from { transform: translateX(0); }
+  to { transform: translateX(-1440px); }
+}
+.wave-layer-a {
+  animation: wave-drift 18s linear infinite;
+}
+.wave-layer-b {
+  animation: wave-drift 26s linear infinite reverse;
+}
+
+/* Gradiente que se desplaza — para CTAs y botón primario en hover */
+@keyframes gradient-pan {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.gradient-bg-pan {
+  background: linear-gradient(
+    115deg,
+    var(--color-brand-950) 0%,
+    var(--color-brand-700) 30%,
+    var(--color-brand-500) 55%,
+    var(--color-brand-700) 80%,
+    var(--color-brand-950) 100%
+  );
+  background-size: 240% 240%;
+  animation: gradient-pan 9s ease-in-out infinite;
+}
+
+/* Blob orgánico que muta su silueta — reemplaza el círculo perfecto */
+@keyframes blob-morph {
+  0%, 100% { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+  34% { border-radius: 62% 38% 45% 55% / 58% 62% 38% 42%; }
+  67% { border-radius: 38% 62% 58% 42% / 45% 38% 62% 55%; }
+}
+.animate-blob {
+  animation: blob-morph 16s ease-in-out infinite;
+}
+
+/* Flotaciones con distinta amplitud para romper la sincronía */
+@keyframes float-lg {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-18px); }
+}
+.animate-float-lg {
+  animation: float-lg 9s ease-in-out infinite;
+}
+
+/* Órbita: un punto girando alrededor del motif */
+@keyframes orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-orbit {
+  animation: orbit 22s linear infinite;
+}
+
+/* Brillo diagonal que cruza una tarjeta al pasar el cursor */
+.sheen {
+  position: relative;
+  overflow: hidden;
+}
+.sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 32%,
+    rgb(255 255 255 / 0.55) 48%,
+    transparent 64%
+  );
+  transform: translateX(-130%);
+  transition: transform 0.75s ease;
+  pointer-events: none;
+}
+.sheen:hover::after {
+  transform: translateX(130%);
+}
+
+/* Trazo que se dibuja solo (subrayado a mano, números de sección) */
+@keyframes draw-stroke {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Grano sutil para dar textura y quitar el look "plano de plantilla" */
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-in,
+  .wave-layer-a,
+  .wave-layer-b,
+  .gradient-bg-pan,
+  .animate-blob,
+  .animate-float-lg,
+  .animate-orbit {
+    animation: none;
+  }
+  .sheen::after {
+    display: none;
+  }
+}
