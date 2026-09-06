@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
 import { AnimatePresence, motion } from "framer-motion";
@@ -11,9 +12,7 @@ import { Container } from "@/components/ui/container";
 import { Button } from "@/components/ui/button";
 import { Stepper } from "@/components/site/stepper";
 import {
-  servicios,
   catalogo,
-  sedes,
   indicacionesPreviasPorCategoria,
   contacto,
   tiposDocumento,
@@ -25,15 +24,17 @@ import {
   motivosConsulta,
   OTRO,
 } from "@/lib/data";
-import {
-  slotsDisponibles,
-  ocupadosEjemplo,
-  sedeAtiende,
-  fechaMinimaReserva,
-  sumarHora,
-  fechaISO,
-} from "@/lib/agenda";
+import { fechaMinimaReserva, sumarHora, fechaISO } from "@/lib/agenda";
+import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+const MENSAJE_ERROR: Record<string, string> = {
+  cupo_ocupado: "Ese horario se acaba de ocupar. Elige otro, por favor.",
+  anticipacion_insuficiente: "Las citas se reservan con al menos 24 horas de anticipación.",
+  valoracion_requerida:
+    "Para tu primera cita agendamos una Valoración inicial. Después de esa consulta podrás reservar los demás servicios.",
+  no_reservable: "Ese servicio no se reserva en línea. Escríbenos al 311 398 1422.",
+};
 
 const steps = ["Servicio", "Sede", "Fecha y hora", "Tus datos", "Confirmación"];
 
@@ -117,21 +118,39 @@ export function ReservaWizard() {
   const [hora, setHora] = useState<string>("");
   const [enviado, setEnviado] = useState(false);
   const [referencia, setReferencia] = useState("");
+  const [errorEnvio, setErrorEnvio] = useState("");
+  const [enviando, setEnviando] = useState(false);
+
+  // Una clave de idempotencia por recorrido del wizard: si el usuario da doble
+  // clic o reintenta, core-api devuelve la misma reserva y no crea otra.
+  const idempotencyKey = useMemo(
+    () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `k-${Date.now()}-${Math.random()}`),
+    [],
+  );
+
+  const { data: servicios = [] } = useQuery({
+    queryKey: ["servicios"],
+    queryFn: api.servicios,
+    staleTime: 5 * 60_000,
+  });
+  const { data: sedes = [] } = useQuery({ queryKey: ["sedes"], queryFn: api.sedes, staleTime: 5 * 60_000 });
 
   const servicio = servicios.find((s) => s.slug === servicioSlug);
   const sedeObj = sedes.find((s) => s.codigo === sedeCodigo);
   const categoria = servicioSlug ? categoriaDeSlug(servicioSlug) : undefined;
   const minFecha = useMemo(() => fechaMinimaReserva(), []);
 
-  const horas = useMemo(() => {
-    if (!fecha || !servicio || !sedeCodigo) return [];
-    return slotsDisponibles(
-      servicio,
-      sedeCodigo,
-      fecha,
-      ocupadosEjemplo(fecha, sedeCodigo)
-    );
-  }, [fecha, servicio, sedeCodigo]);
+  const sedeAtiendeDia = (codigo: string, d: Date): boolean => {
+    const s = sedes.find((x) => x.codigo === codigo);
+    return s ? s.dias.includes(d.getDay()) : false;
+  };
+
+  const fechaSel = fecha ? fechaISO(fecha) : "";
+  const { data: horas = [], isFetching: cargandoHoras } = useQuery({
+    queryKey: ["disponibilidad", servicioSlug, sedeCodigo, fechaSel],
+    queryFn: () => api.disponibilidad(servicioSlug, sedeCodigo, fechaSel),
+    enabled: Boolean(servicioSlug && sedeCodigo && fechaSel),
+  });
 
   const {
     register,
@@ -152,28 +171,40 @@ export function ReservaWizard() {
     setStep((s) => Math.max(s - 1, 0));
   }
 
-  function onConfirmar(data: FichaForm) {
-    if (data.empresa) return;
-    const ref = `FISIO-${Date.now().toString(36).toUpperCase()}`;
-    console.log("Reserva enviada:", {
-      referencia: ref,
-      servicioSlug,
-      servicioNombre: servicio?.nombre,
-      sede: sedeCodigo,
-      fecha: fecha ? fechaISO(fecha) : undefined,
-      hora,
-      duracionMin: servicio?.duracionMin,
-      paciente: {
-        ...data,
-        edad,
-        eps: data.eps === OTRO ? data.epsOtro : data.eps,
-        ciudad: data.ciudad === OTRO ? data.ciudadOtro : data.ciudad,
-        ocupacion: data.ocupacion === OTRO ? data.ocupacionOtro : data.ocupacion,
-      },
-    });
-    setReferencia(ref);
-    setEnviado(true);
-    goNext();
+  async function onConfirmar(data: FichaForm) {
+    if (data.empresa) return; // honeypot
+    setErrorEnvio("");
+    setEnviando(true);
+    try {
+      const r = await api.crearReserva(
+        {
+          servicio: servicioSlug,
+          sede: sedeCodigo,
+          fecha: fecha ? fechaISO(fecha) : "",
+          hora,
+          paciente: {
+            nombre: data.nombre,
+            tipoDocumento: data.tipoDocumento,
+            documento: data.documento,
+            fechaNacimiento: data.fechaNacimiento,
+            genero: data.genero,
+            telefono: data.telefono,
+            email: data.email,
+          },
+        },
+        idempotencyKey,
+      );
+      setReferencia(r.referencia);
+      setEnviado(true);
+      goNext();
+    } catch (e) {
+      const codigo = e instanceof ApiError ? e.codigo : "error";
+      setErrorEnvio(
+        MENSAJE_ERROR[codigo] ?? "No pudimos registrar tu reserva. Intenta de nuevo en un momento.",
+      );
+    } finally {
+      setEnviando(false);
+    }
   }
 
   return (
@@ -370,7 +401,7 @@ export function ReservaWizard() {
                     }}
                     disabled={[
                       { before: minFecha },
-                      (d: Date) => !sedeAtiende(sedeCodigo, d),
+                      (d: Date) => !sedeAtiendeDia(sedeCodigo, d),
                     ]}
                     className="rdp-fisio"
                   />
@@ -390,7 +421,19 @@ export function ReservaWizard() {
                       </motion.div>
                     )}
 
-                    {fecha && horas.length === 0 && (
+                    {fecha && cargandoHoras && (
+                      <motion.div
+                        key="cargando-horas"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="rounded-2xl border border-sky-200 bg-sky-50/60 p-5 text-center text-xs text-ink-600"
+                      >
+                        Consultando horarios disponibles…
+                      </motion.div>
+                    )}
+
+                    {fecha && !cargandoHoras && horas.length === 0 && (
                       <motion.div
                         key="sin-cupos"
                         initial={{ opacity: 0 }}
@@ -402,7 +445,7 @@ export function ReservaWizard() {
                       </motion.div>
                     )}
 
-                    {fecha && horas.length > 0 && (
+                    {fecha && !cargandoHoras && horas.length > 0 && (
                       <motion.div
                         key="horarios"
                         initial={{ opacity: 0 }}
@@ -688,12 +731,18 @@ export function ReservaWizard() {
                 </div>
               </Grupo>
 
+              {errorEnvio && (
+                <p className="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">
+                  {errorEnvio}
+                </p>
+              )}
+
               <div className="mt-8 flex items-center justify-between border-t border-sky-100 pt-5">
-                <Button type="button" variant="ghost" onClick={goBack}>
+                <Button type="button" variant="ghost" onClick={goBack} disabled={enviando}>
                   Atrás
                 </Button>
-                <Button type="submit" className="gradient-bg-pan">
-                  Confirmar Reserva
+                <Button type="submit" className="gradient-bg-pan" disabled={enviando}>
+                  {enviando ? "Enviando…" : "Confirmar Reserva"}
                 </Button>
               </div>
             </motion.form>

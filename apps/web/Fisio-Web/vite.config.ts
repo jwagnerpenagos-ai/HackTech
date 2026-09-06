@@ -15,6 +15,14 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // El sitio llama a la API núcleo por rutas relativas /api/*; en dev el
+    // proxy las manda a core-api (puerto 8000). Así no hay CORS.
+    proxy: {
+      "/api": {
+        target: process.env.CORE_API_URL ?? "http://localhost:8000",
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port: 3000,

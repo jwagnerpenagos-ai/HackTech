@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Loader2, Search, X, Calendar, Activity, User, CheckCircle, Save, 
-  FileText, AlertCircle, Stethoscope 
+import { useNavigate } from 'react-router-dom';
+import {
+  Loader2, Search, X, Calendar, Activity, User, CheckCircle, Save,
+  FileText, AlertCircle, Stethoscope
 } from 'lucide-react';
 import { AdminShell } from '../../components/admin/admin-shell';
 import { IndicadoresCitas } from '../../components/admin/indicadores-cita';
 import { TarjetaCita } from '../../components/admin/tarjeta-cita';
 import type { PropiedadesTarjetaCita } from '../../components/admin/tarjeta-cita';
 import { reservasEjemplo, pacientesEjemplo, type PacienteEjemplo } from '@/lib/data';
+import { api, leerToken, ApiError, type CitaAdminApi } from '@/lib/api';
 
 const normalizarTexto = (texto: string) =>
   texto
@@ -15,6 +17,34 @@ const normalizarTexto = (texto: string) =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[.,\-]/g, "");
+
+// Estado de core-api -> estado que dibuja la tarjeta.
+function estadoTarjeta(e: string): PropiedadesTarjetaCita['estado'] {
+  if (e === 'confirmada' || e === 'en_curso') return 'confirmada';
+  if (e === 'atendida' || e === 'no_asistio') return 'completada';
+  if (e.startsWith('cancelada') || e === 'expirada' || e === 'rechazada') return 'cancelada';
+  return 'pendiente';
+}
+
+function aTarjeta(c: CitaAdminApi): PropiedadesTarjetaCita {
+  const inicio = new Date(c.iniciaEn);
+  const hora = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(inicio);
+  return {
+    id: String(c.reservaId),
+    nombrePaciente: c.paciente ?? 'Sin paciente',
+    hora: `${hora} \u00b7 ${c.sede}`,
+    servicio: c.servicio ?? 'Cita',
+    estado: estadoTarjeta(c.estado),
+    notas: '',
+  };
+}
 
 export const Agenda: React.FC = () => {
   const [modoVista, setModoVista] = useState<'tablero' | 'lista'>('tablero');
@@ -28,33 +58,46 @@ export const Agenda: React.FC = () => {
   } | null>(null);
 
   const [comentarioTemp, setComentarioTemp] = useState('');
+  const navigate = useNavigate();
 
-  // Carga inicial conectada a API con fallback
+  // Carga inicial desde core-api. Sin sesión -> al login. Si la API falla por
+  // otra razón, se muestran datos de ejemplo para no dejar el panel vacío.
   useEffect(() => {
-    const obtenerCitas = async () => {
+    if (!leerToken()) {
+      navigate('/admin/login');
+      return;
+    }
+    let vivo = true;
+    (async () => {
       try {
         setCargando(true);
-        const res = await fetch('/api/citas');
-        if (!res.ok) throw new Error('API no disponible, usando datos de reserva');
-        const data = await res.json();
-        setListaCitas(data);
-      } catch {
-        const citasIniciales: PropiedadesTarjetaCita[] = reservasEjemplo.map((r) => ({
-          id: r.id,
-          nombrePaciente: r.cliente,
-          hora: `${r.fecha} - ${r.hora}`,
-          servicio: r.servicio,
-          estado: r.estado as PropiedadesTarjetaCita['estado'],
-          notas: '',
-        }));
-        setListaCitas(citasIniciales); 
+        const citas = await api.citas();
+        if (vivo) setListaCitas(citas.map(aTarjeta));
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          navigate('/admin/login');
+          return;
+        }
+        if (vivo) {
+          setListaCitas(
+            reservasEjemplo.map((r) => ({
+              id: r.id,
+              nombrePaciente: r.cliente,
+              hora: `${r.fecha} - ${r.hora}`,
+              servicio: r.servicio,
+              estado: r.estado as PropiedadesTarjetaCita['estado'],
+              notas: '',
+            })),
+          );
+        }
       } finally {
-        setCargando(false);
+        if (vivo) setCargando(false);
       }
+    })();
+    return () => {
+      vivo = false;
     };
-
-    obtenerCitas();
-  }, []);
+  }, [navigate]);
 
   const citasFiltradas = useMemo(() => {
     const term = normalizarTexto(q.trim());
@@ -71,24 +114,24 @@ export const Agenda: React.FC = () => {
 
   const manejarConfirmacion = async (idCita: string) => {
     try {
-      await fetch(`/api/citas/${idCita}/confirmar`, { method: 'PATCH' });
-    } catch {
-      console.warn('Sincronización backend pendiente, ejecutando localmente');
+      await api.confirmarCita(Number(idCita));
+      setListaCitas(previas =>
+        previas.map(cita => (cita.id === idCita ? { ...cita, estado: 'confirmada' } : cita)),
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) navigate('/admin/login');
     }
-    setListaCitas(previas =>
-      previas.map(cita => (cita.id === idCita ? { ...cita, estado: 'confirmada' } : cita))
-    );
   };
 
   const manejarCancelacion = async (idCita: string) => {
     try {
-      await fetch(`/api/citas/${idCita}/cancelar`, { method: 'PATCH' });
-    } catch {
-      console.warn('Sincronización backend pendiente, ejecutando localmente');
+      await api.cancelarCita(Number(idCita));
+      setListaCitas(previas =>
+        previas.map(cita => (cita.id === idCita ? { ...cita, estado: 'cancelada' } : cita)),
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) navigate('/admin/login');
     }
-    setListaCitas(previas =>
-      previas.map(cita => (cita.id === idCita ? { ...cita, estado: 'cancelada' } : cita))
-    );
   };
 
   const abrirHistoriaClinica = (cita: PropiedadesTarjetaCita) => {
@@ -108,15 +151,15 @@ export const Agenda: React.FC = () => {
     const idCita = historiaSeleccionada.cita.id;
     const nuevoEstado = completar ? 'completada' : historiaSeleccionada.cita.estado;
 
-    try {
-      await fetch(`/api/citas/${idCita}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notas: comentarioTemp, estado: nuevoEstado }),
-      });
-    } catch {
-      console.warn('Guardado persistido en estado local.');
+    if (completar) {
+      try {
+        await api.asistenciaCita(Number(idCita), true);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) navigate('/admin/login');
+      }
     }
+    // Las notas de la sesión son del módulo de historia clínica (aún sin API);
+    // por ahora se guardan en el estado local del panel.
 
     setListaCitas((previas) =>
       previas.map((c) =>

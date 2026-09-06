@@ -19,6 +19,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Container } from "@/components/ui/container";
 import { BrandMark } from "@/components/site/brand-mark";
 import { Reveal } from "@/components/site/reveal";
+import { api, guardarToken, ApiError } from "@/lib/api";
 
 gsap.registerPlugin(useGSAP);
 
@@ -30,6 +31,7 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [recordar, setRecordar] = useState(true);
+  const [errorLogin, setErrorLogin] = useState("");
 
   useGSAP(
     () => {
@@ -66,14 +68,27 @@ export default function AdminLoginPage() {
     { scope: panelRef }
   );
 
-  const manejarEnvio = (e: React.FormEvent) => {
+  const manejarEnvio = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const usuario = String(fd.get("email") ?? "").trim();
+    const clave = String(fd.get("password") ?? "");
+    setErrorLogin("");
     setCargando(true);
-
-    setTimeout(() => {
-      setCargando(false);
-      navigate("/admin/agenda");
-    }, 1000);
+    api
+      .login(usuario, clave)
+      .then((r) => {
+        guardarToken(r.token);
+        navigate("/admin/agenda");
+      })
+      .catch((err: unknown) => {
+        setErrorLogin(
+          err instanceof ApiError && err.status === 503
+            ? "El panel no está habilitado en este entorno."
+            : "Usuario o contraseña incorrectos.",
+        );
+      })
+      .finally(() => setCargando(false));
   };
 
   return (
@@ -262,6 +277,12 @@ export default function AdminLoginPage() {
                   <span className="text-xs text-slate-600 font-medium">Recordar credenciales</span>
                 </label>
               </div>
+
+              {errorLogin && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                  {errorLogin}
+                </p>
+              )}
 
               <button
                 type="submit"
