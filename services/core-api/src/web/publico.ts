@@ -358,6 +358,9 @@ export async function estadoPagoWeb(
   if (!pago) return { estado: "pendiente", reservaId };
   if (pago.estado === "verificado") return { estado: "aprobado", reservaId };
   if (pago.estado === "rechazado") return { estado: "rechazado", reservaId };
+  // En mock la decisión la toma el checkout simulado (POST /api/pagos/mock),
+  // que ya movió el pago a verificado/rechazado — acá solo queda "pendiente".
+  if (wompi.mock) return { estado: "pendiente", reservaId };
 
   tx ??= await consultarPorReferencia(wompi, referencia);
   if (!tx) return { estado: "pendiente", reservaId };
@@ -371,4 +374,37 @@ export async function estadoPagoWeb(
     return { estado: "rechazado", reservaId };
   }
   return { estado: "pendiente", reservaId };
+}
+
+/**
+ * Checkout simulado (WOMPI_ENV=mock): la página de pago llama acá con la
+ * decisión y el backend verifica/rechaza el pago igual que lo haría Wompi.
+ * Solo para demo, nunca en producción.
+ */
+export async function resolverPagoMock(
+  db: Db,
+  referencia: string,
+  aprobar: boolean,
+): Promise<{ estado: "aprobado" | "rechazado"; reservaId: number | null }> {
+  const fila = await db.query<{ id: number | string; estado: string; reserva_id: number | string | null }>(
+    `SELECT p.id, p.estado,
+            (SELECT rp.reserva_id FROM agenda.reserva_participante rp
+              WHERE rp.compra_id = p.compra_id LIMIT 1) AS reserva_id
+       FROM comercial.pago p
+      WHERE p.referencia = $1
+      ORDER BY p.id DESC LIMIT 1`,
+    [referencia],
+  );
+  const pago = fila.rows[0];
+  if (!pago) throw new ErrorDominio("No se encontró el pago.", "no_encontrado", 404);
+  const reservaId = pago.reserva_id !== null ? Number(pago.reserva_id) : null;
+
+  if (pago.estado === "registrado") {
+    if (aprobar) {
+      await pagos.verificarPago(db, { pagoId: Number(pago.id), por: "mock" });
+    } else {
+      await pagos.rechazarPago(db, { pagoId: Number(pago.id), por: "mock", motivo: "mock:rechazado" });
+    }
+  }
+  return { estado: aprobar ? "aprobado" : "rechazado", reservaId };
 }

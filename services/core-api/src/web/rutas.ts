@@ -121,6 +121,14 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
     );
   });
 
+  // Decisión del checkout simulado (solo con WOMPI_ENV=mock).
+  app.post("/api/pagos/mock", async (req, reply) => {
+    if (!wompi.mock) return reply.code(404).send({ error: "no_encontrado" });
+    const b = z.object({ referencia: z.string().min(1).max(120), aprobar: z.boolean() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: "cuerpo_invalido" });
+    return conDominio(reply, () => publico.resolverPagoMock(db, b.data.referencia, b.data.aprobar));
+  });
+
   // --- Admin (sesión de Lina) -------------------------------------------
 
   app.post("/api/admin/login", async (req, reply) => {

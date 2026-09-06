@@ -12,7 +12,10 @@ import type { Config } from "../config.js";
  */
 
 export interface Wompi {
+  /** Hay pasarela (real o simulada): el sitio debe redirigir a `checkoutUrl`. */
   habilitado: boolean;
+  /** Checkout simulado por el propio sitio, sin cuenta de Wompi (demo). */
+  mock: boolean;
   publicKey: string;
   integritySecret: string;
   apiBase: string;
@@ -21,16 +24,19 @@ export interface Wompi {
 }
 
 export function wompiDeConfig(cfg: Config): Wompi {
-  const habilitado = cfg.WOMPI_PUBLIC_KEY.length > 0 && cfg.WOMPI_INTEGRITY_SECRET.length > 0;
+  const mock = cfg.WOMPI_ENV === "mock";
+  const conLlaves = cfg.WOMPI_PUBLIC_KEY.length > 0 && cfg.WOMPI_INTEGRITY_SECRET.length > 0;
+  const sitio = cfg.WEB_PUBLIC_URL.replace(/\/$/, "");
   const apiBase =
     cfg.WOMPI_ENV === "production" ? "https://production.wompi.co/v1" : "https://sandbox.wompi.co/v1";
   return {
-    habilitado,
+    habilitado: mock || conLlaves,
+    mock,
     publicKey: cfg.WOMPI_PUBLIC_KEY,
     integritySecret: cfg.WOMPI_INTEGRITY_SECRET,
     apiBase,
-    checkoutBase: "https://checkout.wompi.co/p/",
-    redirectBase: `${cfg.WEB_PUBLIC_URL.replace(/\/$/, "")}/reservar/resultado`,
+    checkoutBase: mock ? `${sitio}/reservar/pago-simulado` : "https://checkout.wompi.co/p/",
+    redirectBase: `${sitio}/reservar/resultado`,
   };
 }
 
@@ -57,6 +63,14 @@ export function urlCheckout(
     telefono?: string | null;
   },
 ): string {
+  if (w.mock) {
+    const q = new URLSearchParams({
+      ref: opts.referencia,
+      monto: String(opts.montoCents),
+      moneda: opts.moneda,
+    });
+    return `${w.checkoutBase}?${q.toString()}`;
+  }
   const q = new URLSearchParams({
     "public-key": w.publicKey,
     currency: opts.moneda,

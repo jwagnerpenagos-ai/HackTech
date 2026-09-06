@@ -75,14 +75,22 @@ Respuesta `201`:
   "checkoutUrl": "https://checkout.wompi.co/p/?public-key=…",
   "referenciaPago": "FISIO-42-9d66beac" }
 ```
-La cita nace `pendiente_pago`. **Dos modos según config:**
-- **Con pasarela** (`WOMPI_PUBLIC_KEY` + `WOMPI_INTEGRITY_SECRET`): viene
-  `checkoutUrl` — el sitio redirige ahí. Al volver (Wompi agrega `?id=`), el
-  sitio consulta `GET /api/pagos/estado` y, si el pago aprobó, la cita se
-  confirma sola (el backend llama `comercial.verificar_pago`). La firma de
-  integridad se calcula en el servidor: `SHA256(referencia + montoCents + "COP" + WOMPI_INTEGRITY_SECRET)`.
-- **Sin pasarela**: no viene `checkoutUrl`. Pago manual por Nequi; Lina
-  confirma desde el panel (o el paciente reporta comprobante por el bot).
+La cita nace `pendiente_pago`. **Tres modos según `WOMPI_ENV`:**
+- **`sandbox` / `production`** (con `WOMPI_PUBLIC_KEY` + `WOMPI_INTEGRITY_SECRET`):
+  viene `checkoutUrl` al checkout de Wompi. Al volver (Wompi agrega `?id=`), el
+  sitio consulta `GET /api/pagos/estado`; si aprobó, la cita se confirma sola
+  (`comercial.verificar_pago`). Firma calculada en el servidor:
+  `SHA256(referencia + montoCents + "COP" + WOMPI_INTEGRITY_SECRET)`.
+- **`mock`** (sin llaves): `checkoutUrl` apunta a `/reservar/pago-simulado`
+  del propio sitio — un checkout de demo con botones Aprobar/Rechazar que
+  llaman `POST /api/pagos/mock`. Misma confirmación automática. Para demo sin
+  cuenta de pasarela.
+- **manual** (por defecto, `WOMPI_ENV` distinto de `mock` y sin llaves): no
+  viene `checkoutUrl`. Pago por Nequi; Lina confirma desde el panel.
+
+### `POST /api/pagos/mock` — solo con `WOMPI_ENV=mock`
+Body `{ "referencia": "<referenciaPago>", "aprobar": true|false }`. Verifica o
+rechaza el pago. `404` si el modo no es `mock`.
 
 ### `GET /api/pagos/estado?ref=<referenciaPago>` · `&id=<txId de Wompi>`
 Consulta el estado del pago al volver del checkout. Uno de los dos parámetros.

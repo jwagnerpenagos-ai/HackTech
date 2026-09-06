@@ -153,6 +153,13 @@ export const api = {
     return pedir<EstadoPagoApi>(`/api/pagos/estado?${qs.toString()}`);
   },
 
+  /** Checkout simulado (WOMPI_ENV=mock): registra la decisión de pago. */
+  pagoMock: (referencia: string, aprobar: boolean) =>
+    pedir<{ estado: string; reservaId: number | null }>("/api/pagos/mock", {
+      method: "POST",
+      body: { referencia, aprobar },
+    }),
+
   // Admin
   login: (usuario: string, clave: string) =>
     pedir<{ token: string; expiraEn: string }>("/api/admin/login", { method: "POST", body: { usuario, clave } }),
