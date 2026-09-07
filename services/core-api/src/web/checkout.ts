@@ -109,22 +109,24 @@ export interface EstadoPagoWeb {
   estado: "sin_pago" | "en_proceso" | "aprobado" | "rechazado";
   reservaId: number;
   codigoReferido: string | null;
+  servicio: string | null;
 }
 
 export async function estadoPagoWeb(db: Db, uuid: string): Promise<EstadoPagoWeb> {
   const f = await buscarReserva(db, uuid);
   const reservaId = Number(f.id);
   const codigoReferido = f.codigo_referido;
-  if (f.estado === "confirmada") return { estado: "aprobado", reservaId, codigoReferido };
-  if (f.compra_id === null) return { estado: "sin_pago", reservaId, codigoReferido };
+  const servicio = f.servicio;
+  if (f.estado === "confirmada") return { estado: "aprobado", reservaId, codigoReferido, servicio };
+  if (f.compra_id === null) return { estado: "sin_pago", reservaId, codigoReferido, servicio };
 
   const p = await db.query<{ estado: string }>(
     `SELECT estado FROM comercial.pago WHERE compra_id = $1 ORDER BY id DESC LIMIT 1`,
     [Number(f.compra_id)],
   );
   const e = p.rows[0]?.estado;
-  if (e === "verificado") return { estado: "aprobado", reservaId, codigoReferido };
-  if (e === "rechazado") return { estado: "rechazado", reservaId, codigoReferido };
-  if (e === "registrado") return { estado: "en_proceso", reservaId, codigoReferido };
-  return { estado: "sin_pago", reservaId, codigoReferido };
+  if (e === "verificado") return { estado: "aprobado", reservaId, codigoReferido, servicio };
+  if (e === "rechazado") return { estado: "rechazado", reservaId, codigoReferido, servicio };
+  if (e === "registrado") return { estado: "en_proceso", reservaId, codigoReferido, servicio };
+  return { estado: "sin_pago", reservaId, codigoReferido, servicio };
 }

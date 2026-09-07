@@ -195,7 +195,7 @@ export interface ClienteCoreApi {
     p: { reservaId: number; pacienteId: number },
   ): Promise<ResultadoCoreApi<{ enviado: boolean }>>;
   citasHoy(cfg: Config): Promise<ResultadoCoreApi<{ citas: CitaHoy[] }>>;
-  historiaResumen(cfg: Config, nombre: string): Promise<ResultadoCoreApi<ResultadoHistoriaResumen>>;
+  historiaResumen(cfg: Config, documento: string): Promise<ResultadoCoreApi<ResultadoHistoriaResumen>>;
 }
 
 export const coreApi: ClienteCoreApi = {
@@ -276,8 +276,8 @@ export const coreApi: ClienteCoreApi = {
     const d = z.object({ citas: z.array(CitaHoy) }).safeParse(r.datos);
     return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
   },
-  async historiaResumen(cfg, nombre) {
-    const r = await pedir(cfg, `/historia?nombre=${encodeURIComponent(nombre)}`);
+  async historiaResumen(cfg, documento) {
+    const r = await pedir(cfg, `/historia?documento=${encodeURIComponent(documento)}`);
     if (!r.ok) return r;
     const d = ResultadoHistoriaResumen.safeParse(r.datos);
     return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };

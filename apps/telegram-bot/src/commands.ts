@@ -24,27 +24,39 @@ export const INFO_ACCIONES = [
   { texto: "Antes de su cita", data: "info:cita" },
 ] as const;
 
+/** Botones de personal, solo para chats autorizados — ver menu.ts. */
+export const MENU_ACCIONES_ADMIN = [
+  { texto: "📅 Agenda de hoy", data: "admin:hoy" },
+  { texto: "💳 Pagos pendientes", data: "admin:pagos" },
+] as const;
+
 export function inicio(nivel: NivelAcceso): string {
-  const lineas = [
-    "La Fisioterapeuta Li — Lina Murillo",
+  if (nivel === "autorizado") {
+    return [
+      "🔧 Panel de personal — La Fisioterapeuta Li",
+      "",
+      "Use los botones de abajo, o directamente:",
+      "• /hoy — agenda del día",
+      "• /pagos — comprobantes por verificar",
+      "• /historia <número de documento> — resumen de la historia clínica",
+    ].join("\n");
+  }
+  return [
+    "¡Hola! 👋 Bienvenido a La Fisioterapeuta Li — Lina Murillo.",
     "Fisioterapia en Tunja y Turmequé, Boyacá.",
     "",
-    "Le puedo ayudar con:",
+    "Con gusto le ayudo con:",
     "• Servicios, precios y paquetes",
     "• Horarios disponibles y reserva de citas",
     "• Sus citas programadas",
     "• Información del consultorio (horarios, sedes, pago)",
     "",
-    "Escriba su consulta o use los botones.",
-  ];
-  if (nivel === "autorizado") {
-    lineas.push("", "Usted tiene acceso de personal del consultorio.");
-  }
-  return lineas.join("\n");
+    "Escríbame su consulta o use los botones. ¿En qué le puedo ayudar hoy?",
+  ].join("\n");
 }
 
 export const AYUDA = [
-  "Puedo ayudarle con:",
+  "¡Claro que sí! Con gusto le ayudo con:",
   "• Los servicios y sus precios",
   "• Los horarios disponibles para un servicio",
   "• Reservar una cita",
@@ -119,7 +131,7 @@ export function miId(chatId: number | undefined): string {
 
 export const PONG = "pong";
 
-export const CANCELADO = "Listo, cancelé lo que estábamos haciendo. ¿En qué le ayudo?";
+export const CANCELADO = "Listo, cancelé lo que estábamos haciendo. 🙂 ¿En qué más le puedo ayudar?";
 
 export function noAutorizado(): string {
   return "Su chat no tiene permiso para esta acción. Use /id y solicite acceso al consultorio.";

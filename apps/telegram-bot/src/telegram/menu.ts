@@ -9,6 +9,7 @@ import {
   INFO_PAGO,
   INFO_QUIENES,
   MENU_ACCIONES,
+  MENU_ACCIONES_ADMIN,
   PONG,
   inicio,
   miId,
@@ -35,6 +36,26 @@ const INFO_TEXTOS: Record<string, string> = {
  * de consulta (`verCatalogo` / `verMisCitas` / `verInfo`) las comparten comando
  * y botón, por eso viven como closures aquí.
  */
+/**
+ * El menú de `/start`, extraído para poder mostrarlo también justo después
+ * de que un paciente nuevo acepta el tratamiento de datos (ver
+ * flujoConsentimiento.ts) sin duplicar la lógica de qué botones le
+ * corresponden.
+ */
+export async function enviarMenuPrincipal(ctx: MiContexto, cfg: FlujoDeps["cfg"]): Promise<void> {
+  ctx.session = estadoInicial();
+  const nivel = nivelDeAcceso(cfg, ctx.chat?.id);
+  const teclado =
+    nivel === "autorizado"
+      ? (() => {
+          const k = new InlineKeyboard();
+          for (const a of MENU_ACCIONES_ADMIN) k.text(a.texto, a.data).row();
+          return k;
+        })()
+      : tecladoDe(MENU_ACCIONES);
+  await ctx.reply(inicio(nivel), { reply_markup: teclado });
+}
+
 export function registrarMenu(bot: Bot<MiContexto>, deps: FlujoDeps): void {
   const { cfg, n8n } = deps;
 
@@ -57,8 +78,7 @@ export function registrarMenu(bot: Bot<MiContexto>, deps: FlujoDeps): void {
   };
 
   bot.command("start", async (ctx) => {
-    ctx.session = estadoInicial();
-    await ctx.reply(inicio(nivelDeAcceso(cfg, ctx.chat.id)), { reply_markup: tecladoDe(MENU_ACCIONES) });
+    await enviarMenuPrincipal(ctx, cfg);
   });
   bot.command(["agendar", "cita", "citas"], async (ctx) => {
     await iniciarReservaGuiada(ctx, deps, {});

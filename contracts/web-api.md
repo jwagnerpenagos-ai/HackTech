@@ -115,10 +115,13 @@ cita ya no está `pendiente_pago`).
 ### `GET /api/pagos/estado?ref=<uuid>`
 Estado del pago, para que la pantalla "en proceso" haga polling.
 ```json
-{ "estado": "en_proceso", "reservaId": 42 }
+{ "estado": "en_proceso", "reservaId": 42, "codigoReferido": null,
+  "servicio": "Valoración inicial" }
 ```
 `estado`: `sin_pago` | `en_proceso` (pago `registrado`, esperando a Lina) |
 `aprobado` (pago `verificado` o cita `confirmada`) | `rechazado`.
+`servicio` viaja para que, al llegar a `aprobado`, la pantalla muestre las
+indicaciones previas concretas (ropa cómoda, etc.) sin otra llamada.
 
 ---
 

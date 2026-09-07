@@ -3,6 +3,7 @@ import type { UserFromGetMe } from "grammy/types";
 import type { Config } from "./config.js";
 import { logger } from "./logger.js";
 import { RateLimiter } from "./ratelimit.js";
+import { esAutorizado } from "./auth.js";
 import { estadoInicial, type EstadoConversacion } from "./conversation.js";
 import { interpretar } from "./nluClient.js";
 import type { ResultadoNlu } from "./nluClient.js";
@@ -13,10 +14,30 @@ import { registrarMenu } from "./telegram/menu.js";
 import { registrarFlujoReserva } from "./telegram/flujoReserva.js";
 import { registrarFlujoCancelar } from "./telegram/flujoCancelar.js";
 import { registrarFlujoPagos } from "./telegram/flujoPagos.js";
-import { registrarFlujoAsistencia } from "./telegram/flujoAsistencia.js";
 import { registrarFlujoHoy } from "./telegram/flujoHoy.js";
 import { registrarFlujoHistoria } from "./telegram/flujoHistoria.js";
+import { registrarFlujoConsentimiento, medianteConsentimiento } from "./telegram/flujoConsentimiento.js";
 import { registrarDispatcher } from "./telegram/dispatcher.js";
+
+// Atajos de "modo paciente" (menú de /start y comandos equivalentes) que un
+// chat administrativo NO debe ver ni usar — sí sigue pudiendo escribir en
+// lenguaje natural ("agenda a Laura...", "cancela la cita 9", "¿qué tengo
+// hoy?"): eso es una herramienta real de personal (comandos.ts ya le da
+// alcance distinto vía esAdmin) y bloquearlo rompería esas funciones.
+const COMANDOS_PACIENTE = new Set([
+  "agendar",
+  "cita",
+  "citas",
+  "miscitas",
+  "mis_citas",
+  "cancelarcita",
+  "cancelar_cita",
+  "servicios",
+  "precios",
+  "info",
+]);
+const CALLBACKS_PACIENTE_PREFIJOS = ["menu:", "info:", "rsv:", "cxl:"];
+const AVISO_SOLO_ADMIN = "Este número es de uso administrativo. Use /hoy, /pagos o /historia <documento>.";
 
 export interface DepsBot {
   /** Evita la llamada a getMe (útil en pruebas). */
@@ -78,9 +99,42 @@ export function crearBot(cfg: Config, deps: DepsBot = {}): Bot<MiContexto> {
     await next();
   });
 
+  // Un chat administrativo no ve ni usa los atajos "de paciente" (botones
+  // del menú normal, /agendar, /miscitas, etc.) — pero el texto libre sigue
+  // abierto, porque ahí es donde vive la herramienta real de personal
+  // (agendar/cancelar a nombre de alguien, ver la agenda completa).
+  bot.use(async (ctx, next) => {
+    const chatId = ctx.chat?.id;
+    if (chatId === undefined || !esAutorizado(cfg, chatId)) {
+      await next();
+      return;
+    }
+    if (ctx.callbackQuery) {
+      const data = ctx.callbackQuery.data ?? "";
+      if (CALLBACKS_PACIENTE_PREFIJOS.some((prefijo) => data.startsWith(prefijo))) {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+      await next();
+      return;
+    }
+    const texto = ctx.message?.text ?? "";
+    const comando = texto.startsWith("/") ? (texto.slice(1).split(/[\s@]/)[0] ?? "") : null;
+    if (comando !== null && COMANDOS_PACIENTE.has(comando)) {
+      await ctx.reply(AVISO_SOLO_ADMIN);
+      return;
+    }
+    await next();
+  });
+
+  // Un chat de paciente (no admin) sin el consentimiento de datos ya dado
+  // no ve nada más del bot hasta responder el aviso — ver
+  // flujoConsentimiento.ts. Va antes de cualquier flujo de paciente.
+  bot.use(medianteConsentimiento(cfg));
+
   registrarMenu(bot, flujoDeps);
+  registrarFlujoConsentimiento(bot, flujoDeps);
   registrarFlujoPagos(bot, flujoDeps);
-  registrarFlujoAsistencia(bot, flujoDeps);
   registrarFlujoHoy(bot, flujoDeps);
   registrarFlujoHistoria(bot, flujoDeps);
   registrarFlujoReserva(bot, flujoDeps);

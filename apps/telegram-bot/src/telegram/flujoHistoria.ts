@@ -5,12 +5,14 @@ import type { HistoriaResumen } from "../coreApiClient.js";
 import type { FlujoDeps, MiContexto } from "./contexto.js";
 
 /**
- * `/historia <nombre>`: resumen de la historia clínica de un paciente, como
- * texto directo en el chat. No es un PDF — eso hoy solo se genera en el
- * navegador (ver historia-clinica-modal.tsx) y montar generación de PDF en
- * el servidor es una pieza nueva que no vale la pena a esta altura. Junta
- * datos personales, antecedentes, la última anamnesis/signos/dolor
- * registrados y las evoluciones y citas más recientes.
+ * `/historia <documento>`: resumen de la historia clínica de un paciente,
+ * buscado por número de documento (exacto, no por nombre — más preciso y
+ * sin ambigüedad para algo tan sensible), como texto directo en el chat. No
+ * es un PDF — eso hoy solo se genera en el navegador (ver
+ * historia-clinica-modal.tsx) y montar generación de PDF en el servidor es
+ * una pieza nueva que no vale la pena a esta altura. Junta datos
+ * personales, antecedentes, la última anamnesis/signos/dolor registrados y
+ * las evoluciones y citas más recientes.
  */
 
 function fechaCorta(iso: string): string {
@@ -95,23 +97,23 @@ export function registrarFlujoHistoria(bot: Bot<MiContexto>, deps: FlujoDeps): v
       await ctx.reply("Este comando es solo para el personal del consultorio.");
       return;
     }
-    const nombre = ctx.match.trim();
-    if (!nombre) {
-      await ctx.reply("Uso: /historia <nombre del paciente>\nEj.: /historia Ana Ríos");
+    const documento = ctx.match.trim();
+    if (!documento) {
+      await ctx.reply("Uso: /historia <número de documento>\nEj.: /historia 1103456789");
       return;
     }
-    const r = await deps.cApi.historiaResumen(deps.cfg, nombre);
+    const r = await deps.cApi.historiaResumen(deps.cfg, documento);
     if (!r.ok) {
       await ctx.reply("No pude consultar la historia clínica en este momento.");
       return;
     }
     if (r.datos.tipo === "no_encontrado") {
-      await ctx.reply(`No encontré ningún paciente que coincida con "${nombre}".`);
+      await ctx.reply(`No encontré ningún paciente con el documento "${documento}".`);
       return;
     }
     if (r.datos.tipo === "ambiguo") {
       const lista = r.datos.candidatos.map((c) => `• ${c.nombreCompleto}`).join("\n");
-      await ctx.reply(`Hay más de un paciente con ese nombre; sea más específico:\n${lista}`);
+      await ctx.reply(`Hay más de un paciente con ese número de documento; contacte al soporte:\n${lista}`);
       return;
     }
     await ctx.reply(formatearResumen(r.datos.resumen));

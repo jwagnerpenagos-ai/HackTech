@@ -195,9 +195,9 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
   );
 
   app.get("/historia", async (req, reply) => {
-    const q = z.object({ nombre: z.string().trim().min(1).max(120) }).safeParse(req.query);
+    const q = z.object({ documento: z.string().trim().min(1).max(20) }).safeParse(req.query);
     if (!q.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
-    return conDominio(reply, () => historiaResumen.resumenHistoria(db, q.data.nombre));
+    return conDominio(reply, () => historiaResumen.resumenHistoria(db, q.data.documento));
   });
 
   // --- Recordatorios de cita (ver dominio/notificaciones.ts) ---

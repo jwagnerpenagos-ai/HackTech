@@ -50,7 +50,7 @@ function resumenReserva(f: {
 }): string {
   const reprogramando = f.reprogramarDe !== undefined;
   return [
-    reprogramando ? "Por favor confirme el nuevo horario de su cita:" : "Por favor confirme su cita:",
+    reprogramando ? "¡Ya casi! Confirme el nuevo horario de su cita:" : "¡Ya casi! Confirme los datos de su cita:",
     "",
     `• Servicio: ${f.servicio ?? "?"}`,
     `• Fecha: ${f.fecha ? fechaLarga(f.fecha) : "?"}`,
@@ -80,8 +80,8 @@ export async function pedirComprobante(ctx: MiContexto, datos: unknown): Promise
   };
   await ctx.reply(
     [
-      `Para confirmar la cita, transfiera ${formatearMonto(d.montoTotal)} a la Llave Nequi ${LLAVE_NEQUI}`,
-      "y envíeme aquí la foto del comprobante.",
+      `Para confirmar su cita, transfiera ${formatearMonto(d.montoTotal)} a la Llave Nequi ${LLAVE_NEQUI}`,
+      "y envíeme aquí la foto del comprobante. 📸",
       "",
       "Si no recibimos el pago con al menos 24 horas de anticipación, el cupo se libera.",
     ].join("\n"),
@@ -232,7 +232,7 @@ async function reprogramarConfirmar(
   }
 
   const cabecera = [
-    "Su cita quedó reprogramada. 📅",
+    "¡Listo! Su cita quedó reprogramada. 📅",
     "",
     flujo.servicio ?? "",
     `${flujo.fecha ? fechaLarga(flujo.fecha) : "?"} · ${flujo.hora ?? "?"}`,
@@ -294,7 +294,7 @@ async function reservaConfirmar(ctx: MiContexto, deps: FlujoDeps): Promise<void>
   const nro = datosPago(resultado.datos).reservaId ?? "?";
   await editarOResponder(
     ctx,
-    ["Su cita quedó reservada. 📅", "", flujo.servicio, `${fechaLarga(flujo.fecha)} · ${flujo.hora}`, flujo.sede ?? "", `Reserva #${nro}`]
+    ["¡Listo! Su cita quedó reservada. 📅", "", flujo.servicio, `${fechaLarga(flujo.fecha)} · ${flujo.hora}`, flujo.sede ?? "", `Reserva #${nro}`]
       .filter((l) => l.length > 0)
       .join("\n"),
   );

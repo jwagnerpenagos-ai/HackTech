@@ -4,6 +4,13 @@ import { loadConfig } from "../src/config.js";
 import { crearBot } from "../src/bot.js";
 import type { ResultadoNlu } from "../src/nluClient.js";
 import type { ResultadoEjecucion } from "../src/n8nClient.js";
+import { otorgarConsentimientoParaPruebas } from "../src/telegram/flujoConsentimiento.js";
+
+// Chats de paciente que usan las pruebas de todo el archivo: se les da por
+// otorgado el consentimiento de datos de una vez, para no tener que resolver
+// el aviso en cada prueba que no es sobre ese flujo en particular (que sí se
+// prueba aparte, con un chat nuevo, más abajo).
+for (const chatId of [500, 777, 999]) otorgarConsentimientoParaPruebas(chatId);
 
 const cfg = loadConfig(); // allowlist de pruebas: 111,222
 
@@ -238,6 +245,40 @@ beforeEach(() => {
   updateId = 0;
 });
 
+describe("consentimiento de datos", () => {
+  it("un chat de paciente nuevo ve el aviso de datos antes que nada más, incluso /ping", async () => {
+    const { bot, enviados } = crearBotDePrueba();
+    await bot.handleUpdate(updateTexto("hola", 111222));
+    expect(enviados[0]).toContain("Ley 1581 de 2012");
+    await bot.handleUpdate(updateTexto("/ping", 111222));
+    expect(enviados[1]).toContain("Ley 1581 de 2012"); // sigue bloqueado, ni /ping pasa
+  });
+
+  it("al aceptar, se muestra el menú principal y ya no vuelve a pedirse", async () => {
+    const { bot, enviados } = crearBotDePrueba();
+    await bot.handleUpdate(updateTexto("hola", 111223));
+    await bot.handleUpdate(updateCallback("consentimiento:si", 111223));
+    expect(enviados[1]).toContain("La Fisioterapeuta Li");
+    await bot.handleUpdate(updateTexto("/ping", 111223));
+    expect(enviados[2]).toBe("pong"); // ya no lo vuelve a interceptar
+  });
+
+  it("al rechazar, no se muestra el menú y se sigue pidiendo consentimiento después", async () => {
+    const { bot, enviados } = crearBotDePrueba();
+    await bot.handleUpdate(updateTexto("hola", 111224));
+    await bot.handleUpdate(updateCallback("consentimiento:no", 111224));
+    expect(enviados[1]).toContain("Sin esa autorización");
+    await bot.handleUpdate(updateTexto("/ping", 111224));
+    expect(enviados[2]).toContain("Ley 1581 de 2012");
+  });
+
+  it("un chat administrativo no ve el aviso de datos", async () => {
+    const { bot, enviados } = crearBotDePrueba();
+    await bot.handleUpdate(updateTexto("/ping", 111)); // staff (allowlist de pruebas)
+    expect(enviados[0]).toBe("pong");
+  });
+});
+
 describe("bot (integración)", () => {
   it("/ping responde pong a cualquiera", async () => {
     const { bot, enviados } = crearBotDePrueba();
@@ -359,7 +400,7 @@ describe("bot (integración)", () => {
     expect(enviados[1]).toContain("Punción seca");
 
     await bot.handleUpdate(updateCallback("rsv:slot:0", 500)); // primer horario propuesto
-    expect(enviados[2]).toContain("confirme su cita");
+    expect(enviados[2]).toContain("Confirme los datos de su cita");
 
     await bot.handleUpdate(updateCallback("rsv:ok", 500));
     expect(enviados[3]).toContain("quedó reservada");
@@ -380,7 +421,7 @@ describe("bot (integración)", () => {
     expect(enviados.at(-1)).toContain("Horarios libres");
 
     await bot.handleUpdate(updateCallback("rsv:hora:10:00", 500));
-    expect(enviados.at(-1)).toContain("confirme su cita");
+    expect(enviados.at(-1)).toContain("Confirme los datos de su cita");
   });
 
   it("reserva guiada: 'volver' desde 'otro día' regresa a los próximos horarios", async () => {
@@ -543,7 +584,7 @@ describe("bot (integración)", () => {
     expect(enviados.at(-1)).toContain("Va a reprogramar");
 
     await bot.handleUpdate(updateCallback("rsv:slot:0", 500));
-    expect(enviados.at(-1)).toContain("confirme el nuevo horario");
+    expect(enviados.at(-1)).toContain("Confirme el nuevo horario");
 
     await bot.handleUpdate(updateCallback("rsv:ok", 500));
     expect(enviados.at(-1)).toContain("reprogramada");
@@ -668,22 +709,20 @@ describe("bot (integración)", () => {
     expect(enviados[0]).toContain("solo para el personal");
   });
 
-  it("staff registra la asistencia y la cita queda atendida", async () => {
-    const { coreApi } = coreApiDePrueba();
-    const { bot, enviados } = crearBotDePrueba(undefined, n8nGuiado, coreApi);
-
-    await bot.handleUpdate(updateTexto("/asistencia", 111)); // staff
-    expect(enviados.some((t) => t.includes("Reserva #99"))).toBe(true);
-
-    await bot.handleUpdate(updateCallback("asis:ok:99", 111));
-    expect(enviados.some((t) => t.includes("asistencia registrada"))).toBe(true);
+  it("un chat administrativo no puede usar los atajos de paciente (/agendar, /miscitas, ...)", async () => {
+    const { bot, enviados } = crearBotDePrueba();
+    await bot.handleUpdate(updateTexto("/agendar", 111)); // staff
+    expect(enviados[0]).toContain("uso administrativo");
+    await bot.handleUpdate(updateTexto("/miscitas", 111));
+    expect(enviados[1]).toContain("uso administrativo");
+    await bot.handleUpdate(updateTexto("/servicios", 111));
+    expect(enviados[2]).toContain("uso administrativo");
   });
 
-  it("/asistencia es solo para el staff", async () => {
-    const { coreApi } = coreApiDePrueba();
-    const { bot, enviados } = crearBotDePrueba(undefined, n8nGuiado, coreApi);
-    await bot.handleUpdate(updateTexto("/asistencia", 500));
-    expect(enviados[0]).toContain("solo para el personal");
+  it("un paciente normal sí puede usar /agendar", async () => {
+    const { bot, enviados } = crearBotDePrueba();
+    await bot.handleUpdate(updateTexto("/agendar", 500)); // no autorizado
+    expect(enviados[0]).not.toContain("uso administrativo");
   });
 
   it("paciente registrado sin valoración atendida: sigue en valoración-only", async () => {

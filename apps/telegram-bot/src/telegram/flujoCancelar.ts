@@ -102,8 +102,8 @@ export function registrarFlujoCancelar(bot: Bot<MiContexto>, deps: FlujoDeps): v
     await editarOResponder(
       ctx,
       estadoDeResultado(resultado.datos) === "cancelada_tarde"
-        ? "Su cita quedó cancelada. Como fue con menos de 24 h de anticipación, según la política se cobra el valor."
-        : `Su cita de ${c.servicio} quedó cancelada, sin ningún cargo.`,
+        ? "Listo, su cita quedó cancelada. Como fue con menos de 24 h de anticipación, según la política se cobra el valor."
+        : `Listo, su cita de ${c.servicio} quedó cancelada, sin ningún cargo. Cuando quiera agendar otra, aquí estoy.`,
     );
   });
 }

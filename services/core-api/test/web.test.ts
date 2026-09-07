@@ -125,6 +125,7 @@ describe("web/checkout", () => {
     expect(await estadoPagoWeb(db, "11111111-1111-1111-1111-111111111111")).toEqual({
       estado: "en_proceso",
       reservaId: 42,
+      servicio: "Valoración inicial",
     });
   });
 
@@ -133,6 +134,7 @@ describe("web/checkout", () => {
     expect(await estadoPagoWeb(db, "11111111-1111-1111-1111-111111111111")).toEqual({
       estado: "aprobado",
       reservaId: 42,
+      servicio: "Valoración inicial",
     });
   });
 

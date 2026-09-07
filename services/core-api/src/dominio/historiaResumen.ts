@@ -1,5 +1,4 @@
 import type { Db } from "../db.js";
-import * as pacientes from "./pacientes.js";
 import * as clinico from "../web/clinico.js";
 
 /**
@@ -31,17 +30,38 @@ export type ResultadoHistoriaResumen =
 const MAX_EVOLUCIONES = 3;
 const MAX_CITAS = 5;
 
-export async function resumenHistoria(db: Db, nombre: string): Promise<ResultadoHistoriaResumen> {
-  const r = await pacientes.buscarPaciente(db, nombre);
-  if (r.tipo === "no_encontrado") return { tipo: "no_encontrado" };
-  if (r.tipo === "ambiguo") {
+/**
+ * Búsqueda por número de documento (exacta, no difusa): es un identificador
+ * mucho más preciso que el nombre para algo tan sensible como la historia
+ * clínica. `LIMIT 2` es solo defensivo — dos personas activas con el mismo
+ * número pero distinto tipo de documento no debería pasar, pero si pasa se
+ * reporta como ambiguo en vez de mostrar la ficha equivocada.
+ */
+export async function resumenHistoria(db: Db, documento: string): Promise<ResultadoHistoriaResumen> {
+  const doc = documento.trim();
+  const r = await db.query<{
+    id: number | string;
+    nombre_completo: string;
+    telefono: string | null;
+    email: string | null;
+  }>(
+    `SELECT id, nombres || ' ' || apellidos AS nombre_completo, telefono, email
+       FROM personas.paciente
+      WHERE numero_documento = $1 AND activo
+      LIMIT 2`,
+    [doc],
+  );
+
+  if (r.rows.length === 0) return { tipo: "no_encontrado" };
+  if (r.rows.length > 1) {
     return {
       tipo: "ambiguo",
-      candidatos: r.candidatos.map((c) => ({ id: c.id, nombreCompleto: c.nombreCompleto })),
+      candidatos: r.rows.map((f) => ({ id: Number(f.id), nombreCompleto: f.nombre_completo })),
     };
   }
 
-  const pacienteId = r.paciente.id;
+  const fila = r.rows[0]!;
+  const pacienteId = Number(fila.id);
   const [antecedentes, anamnesis, vitales, dolor, evoluciones, citas] = await Promise.all([
     clinico.listarAntecedentesPaciente(db, pacienteId),
     clinico.listarAnamnesis(db, pacienteId),
@@ -55,9 +75,9 @@ export async function resumenHistoria(db: Db, nombre: string): Promise<Resultado
     tipo: "encontrado",
     resumen: {
       pacienteId,
-      nombreCompleto: r.paciente.nombreCompleto,
-      telefono: r.paciente.telefono,
-      email: r.paciente.email,
+      nombreCompleto: fila.nombre_completo,
+      telefono: fila.telefono,
+      email: fila.email,
       antecedentes: antecedentes.map((a) => ({ nombre: a.nombre, detalle: a.detalle, esBanderaRoja: a.esBanderaRoja })),
       anamnesisUltima: anamnesis[0] ?? null,
       vitalesUltima: vitales[0] ?? null,

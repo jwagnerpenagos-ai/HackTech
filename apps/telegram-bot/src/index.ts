@@ -51,6 +51,28 @@ function main(): void {
       );
     });
 
+  // Menú nativo aparte para el personal (scope por chat): SOLO los comandos
+  // administrativos — un chat autorizado no ve ni usa el bot "de paciente"
+  // (ver el middleware en bot.ts que lo bloquea aunque lo escriba a mano).
+  for (const chatId of cfg.allowedChatIds) {
+    void bot.api
+      .setMyCommands(
+        [
+          { command: "start", description: "Menú principal" },
+          { command: "hoy", description: "Agenda de hoy" },
+          { command: "pagos", description: "Pagos pendientes por verificar" },
+          { command: "historia", description: "Historia clínica por número de documento" },
+        ],
+        { scope: { type: "chat", chat_id: chatId } },
+      )
+      .catch((err: unknown) => {
+        logger.warn(
+          { chatId, err: err instanceof Error ? err.message : "desconocido" },
+          "no se pudo registrar el menú de comandos del personal",
+        );
+      });
+  }
+
   logger.info(
     { entorno: cfg.TELEGRAM_ENTORNO, autorizados: cfg.allowedChatIds.size },
     "arrancando bot en long polling",

@@ -28,35 +28,46 @@ function lineaCita(c: CitaHoy): string {
   return `${horaCorta(c.iniciaEn)} · ${c.paciente ?? "Sin paciente"} · ${c.servicio ?? "?"} · ${c.sede} · ${estado}`;
 }
 
+/** Reutilizable por el comando `/hoy` y el botón "📅 Agenda de hoy" del menú de personal. */
+export async function mostrarAgendaHoy(ctx: MiContexto, deps: FlujoDeps): Promise<void> {
+  const r = await deps.cApi.citasHoy(deps.cfg);
+  if (!r.ok) {
+    await ctx.reply("No pude consultar la agenda de hoy en este momento.");
+    return;
+  }
+  if (r.datos.citas.length === 0) {
+    await ctx.reply("No hay citas registradas para hoy.");
+    return;
+  }
+  const citas = [...r.datos.citas].sort((a, b) => a.iniciaEn.localeCompare(b.iniciaEn));
+  const fecha = new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date());
+  const texto = [
+    `📅 Agenda de hoy — ${fecha}`,
+    "",
+    ...citas.map(lineaCita),
+    "",
+    `${citas.length} ${citas.length === 1 ? "cita" : "citas"} en total.`,
+  ].join("\n");
+  await ctx.reply(texto);
+}
+
 export function registrarFlujoHoy(bot: Bot<MiContexto>, deps: FlujoDeps): void {
   bot.command("hoy", async (ctx) => {
     if (!esAutorizado(deps.cfg, ctx.chat.id)) {
       await ctx.reply("Este comando es solo para el personal del consultorio.");
       return;
     }
-    const r = await deps.cApi.citasHoy(deps.cfg);
-    if (!r.ok) {
-      await ctx.reply("No pude consultar la agenda de hoy en este momento.");
-      return;
-    }
-    if (r.datos.citas.length === 0) {
-      await ctx.reply("No hay citas registradas para hoy.");
-      return;
-    }
-    const citas = [...r.datos.citas].sort((a, b) => a.iniciaEn.localeCompare(b.iniciaEn));
-    const fecha = new Intl.DateTimeFormat("es-CO", {
-      timeZone: "America/Bogota",
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    }).format(new Date());
-    const texto = [
-      `📅 Agenda de hoy — ${fecha}`,
-      "",
-      ...citas.map(lineaCita),
-      "",
-      `${citas.length} ${citas.length === 1 ? "cita" : "citas"} en total.`,
-    ].join("\n");
-    await ctx.reply(texto);
+    await mostrarAgendaHoy(ctx, deps);
+  });
+
+  bot.callbackQuery("admin:hoy", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    if (!esAutorizado(deps.cfg, ctx.chat?.id ?? 0)) return;
+    await mostrarAgendaHoy(ctx, deps);
   });
 }

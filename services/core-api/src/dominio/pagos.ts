@@ -2,6 +2,23 @@ import type { Db } from "../db.js";
 import { ErrorDominio, normalizarErrorDb } from "../errores.js";
 import * as integraciones from "./integraciones.js";
 
+/**
+ * Indicaciones previas por tipo de servicio (contenido real de Lina, ver
+ * services/nlu/conocimiento/primera-cita.md). Coincide con lo que ya sabe
+ * el asistente si se lo preguntan por chat — este texto es el mismo, solo
+ * que se envía proactivamente al confirmar el pago y en el recordatorio.
+ */
+function indicacionesPara(servicio: string | null): string {
+  const s = (servicio ?? "").toLowerCase();
+  if (/punci[oó]n|neural|prp|plasma|suero/.test(s)) {
+    return "Venga con ropa holgada y cómoda que dé acceso fácil a la zona a tratar, y le pedimos puntualidad estricta.";
+  }
+  if (/descarga|modulaci[oó]n/.test(s)) {
+    return "Venga con ropa cómoda que permita trabajar la zona a tratar. Si gusta, traiga hidratación y una toalla, y llegue con un poco de anticipación.";
+  }
+  return "Venga con ropa cómoda o deportiva y calzado adecuado para ejercicio. Si gusta, traiga hidratación y una toalla, y por favor llegue de 5 a 10 minutos antes.";
+}
+
 /** Fecha/hora de Bogotá en texto, para el correo de confirmación. */
 function fechaHoraBogota(iso: string): string {
   const d = new Date(iso);
@@ -168,6 +185,8 @@ export async function verificarPago(
             "",
             `Cuándo: ${fechaHoraBogota(f.inicia_en)}`,
             f.sede ? `Dónde: ${f.sede}` : "",
+            "",
+            indicacionesPara(f.servicio),
             "",
             "Recibimos su pago. La esperamos. Si necesita reprogramar, escríbanos al 311 398 1422.",
             "",

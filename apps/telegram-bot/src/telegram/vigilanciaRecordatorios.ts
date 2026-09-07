@@ -22,6 +22,22 @@ function fechaHoraBogota(iso: string): string {
 }
 
 /**
+ * Indicaciones previas por tipo de servicio (contenido real de Lina, ver
+ * services/nlu/conocimiento/primera-cita.md). Duplicado a propósito en
+ * core-api y en el bot, igual que fechaHoraBogota en este mismo archivo.
+ */
+function indicacionesPara(servicio: string | null): string {
+  const s = (servicio ?? "").toLowerCase();
+  if (/punci[oó]n|neural|prp|plasma|suero/.test(s)) {
+    return "Venga con ropa holgada y cómoda que dé acceso fácil a la zona a tratar, y le pedimos puntualidad estricta.";
+  }
+  if (/descarga|modulaci[oó]n/.test(s)) {
+    return "Venga con ropa cómoda que permita trabajar la zona a tratar. Si gusta, traiga hidratación y una toalla, y llegue con un poco de anticipación.";
+  }
+  return "Venga con ropa cómoda o deportiva y calzado adecuado para ejercicio. Si gusta, traiga hidratación y una toalla, y por favor llegue de 5 a 10 minutos antes.";
+}
+
+/**
  * Recordatorio de cita 24h antes. Cada `intervaloMs` le pide a core-api que
  * reclame (inserte de forma atómica) las citas confirmadas que caen en esa
  * ventana y todavía no tienen recordatorio. Por cada una: si la paciente
@@ -53,6 +69,8 @@ export function iniciarVigilanciaRecordatorios(
           "",
           `Cuándo: ${cuando}`,
           rec.sede ? `Dónde: ${rec.sede}` : "",
+          "",
+          indicacionesPara(rec.servicio),
           "",
           "Si necesita cancelar o reprogramar, escríbanos al 311 398 1422.",
         ]

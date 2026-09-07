@@ -25,6 +25,23 @@ export interface RecordatorioPendiente {
   pacienteEmail: string | null;
 }
 
+/**
+ * Indicaciones previas por tipo de servicio (contenido real de Lina, ver
+ * services/nlu/conocimiento/primera-cita.md). Duplicado de pagos.ts a
+ * propósito (mismo patrón que fechaHoraBogota en este archivo): son módulos
+ * independientes y el texto es chico.
+ */
+function indicacionesPara(servicio: string | null): string {
+  const s = (servicio ?? "").toLowerCase();
+  if (/punci[oó]n|neural|prp|plasma|suero/.test(s)) {
+    return "Venga con ropa holgada y cómoda que dé acceso fácil a la zona a tratar, y le pedimos puntualidad estricta.";
+  }
+  if (/descarga|modulaci[oó]n/.test(s)) {
+    return "Venga con ropa cómoda que permita trabajar la zona a tratar. Si gusta, traiga hidratación y una toalla, y llegue con un poco de anticipación.";
+  }
+  return "Venga con ropa cómoda o deportiva y calzado adecuado para ejercicio. Si gusta, traiga hidratación y una toalla, y por favor llegue de 5 a 10 minutos antes.";
+}
+
 function fechaHoraBogota(iso: string): string {
   const d = new Date(iso);
   const f = new Intl.DateTimeFormat("es-CO", {
@@ -176,6 +193,8 @@ export async function enviarRecordatorioPorEmail(
           "",
           `Cuándo: ${fechaHoraBogota(f.inicia_en)}`,
           f.sede ? `Dónde: ${f.sede}` : "",
+          "",
+          indicacionesPara(f.servicio),
           "",
           "Si necesita cancelar o reprogramar, escríbanos al 311 398 1422.",
           "",
