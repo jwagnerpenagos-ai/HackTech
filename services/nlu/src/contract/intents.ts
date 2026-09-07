@@ -38,6 +38,8 @@ export const NOMBRES_ENTIDAD = [
   "consulta",
   "telefono",
   "email",
+  "documento",
+  "eps",
 ] as const;
 
 const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,6 +60,8 @@ export const EntidadesSchema = z
     consulta: z.string().max(500).nullable().optional(),
     telefono: z.string().max(30).nullable().optional(),
     email: z.string().max(254).nullable().optional(),
+    documento: z.string().max(20).nullable().optional(),
+    eps: z.string().max(120).nullable().optional(),
   })
   .strict();
 
@@ -66,7 +70,7 @@ export const IntencionSchema = z
     intencion: z.enum(INTENCIONES),
     entidades: EntidadesSchema,
     confianza: z.number().min(0).max(1),
-    faltantes: z.array(z.enum(NOMBRES_ENTIDAD)).max(13),
+    faltantes: z.array(z.enum(NOMBRES_ENTIDAD)).max(15),
     // Solo relevante para intencion="charla_general" (respuesta conversacional
     // grounded en services/nlu/conocimiento/). Para el resto va null/omitido.
     respuesta: z.string().max(600).nullable().optional(),

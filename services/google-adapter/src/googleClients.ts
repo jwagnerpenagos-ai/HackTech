@@ -24,6 +24,13 @@ export interface CalendarClient {
   eliminarEvento: (calendarId: string, eventoId: string) => Promise<void>;
 }
 
+export interface SheetsClient {
+  /** Agrega una fila al final de la hoja indicada (se crea la hoja, con encabezado, si no existe). Devuelve en qué fila quedó. */
+  agregarFila: (spreadsheetId: string, hoja: string, valores: (string | number)[]) => Promise<{ fila: number }>;
+  /** Sobrescribe una fila ya existente (por número), para reflejar un cambio de estado sin duplicar la cita. */
+  actualizarFila: (spreadsheetId: string, hoja: string, fila: number, valores: (string | number)[]) => Promise<void>;
+}
+
 /** Construye el mensaje RFC 2822 mínimo y lo codifica en base64url, como pide la API de Gmail. */
 function construirMimeBase64(msg: { destinatario: string; asunto: string; texto: string }): string {
   const mime = [
@@ -120,6 +127,63 @@ export async function intercambiarCodigo(
     refreshToken: tokens.refresh_token ?? null,
     scope: tokens.scope ?? "",
     expiraEn: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+  };
+}
+
+const ENCABEZADO_RESERVAS = ["Fecha", "Paciente", "Servicio", "Sede", "Estado"];
+
+export function construirSheetsClient(auth: InstanceType<typeof google.auth.OAuth2>): SheetsClient {
+  const sheets = google.sheets({ version: "v4", auth });
+  const hojasCreadas = new Set<string>();
+
+  async function asegurarHoja(spreadsheetId: string, hoja: string): Promise<void> {
+    const clave = `${spreadsheetId}:${hoja}`;
+    if (hojasCreadas.has(clave)) return;
+    const meta = await sheets.spreadsheets.get({ spreadsheetId });
+    const existe = (meta.data.sheets ?? []).some((s) => s.properties?.title === hoja);
+    if (!existe) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: [{ addSheet: { properties: { title: hoja } } }] },
+      });
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${hoja}!A1:E1`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [ENCABEZADO_RESERVAS] },
+      });
+    }
+    hojasCreadas.add(clave);
+  }
+
+  /** Extrae el número de fila de un `updatedRange` tipo "Reservas!A5:E5". */
+  function filaDeRango(rango: string | null | undefined): number {
+    const m = /![A-Z]+(\d+)/.exec(rango ?? "");
+    if (!m || !m[1]) throw new Error(`No pude interpretar la fila desde el rango devuelto por Sheets: "${String(rango)}".`);
+    return Number(m[1]);
+  }
+
+  return {
+    async agregarFila(spreadsheetId, hoja, valores) {
+      await asegurarHoja(spreadsheetId, hoja);
+      const r = await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: `${hoja}!A:E`,
+        valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: { values: [valores] },
+      });
+      return { fila: filaDeRango(r.data.updates?.updatedRange) };
+    },
+    async actualizarFila(spreadsheetId, hoja, fila, valores) {
+      await asegurarHoja(spreadsheetId, hoja);
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${hoja}!A${fila}:E${fila}`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: { values: [valores] },
+      });
+    },
   };
 }
 

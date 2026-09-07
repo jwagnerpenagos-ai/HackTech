@@ -22,6 +22,7 @@ interface FilaReserva {
   sede: string | null;
   paciente: string;
   inicia_en: string;
+  codigo_referido: string | null;
 }
 
 async function buscarReserva(db: Db, uuid: string): Promise<FilaReserva> {
@@ -30,7 +31,8 @@ async function buscarReserva(db: Db, uuid: string): Promise<FilaReserva> {
             c.valor_total, c.moneda,
             s.nombre AS servicio, se.nombre AS sede,
             (pa.nombres || ' ' || pa.apellidos) AS paciente,
-            lower(r.franja_clinica) AS inicia_en
+            lower(r.franja_clinica) AS inicia_en,
+            pa.codigo_referido
        FROM agenda.reserva r
        LEFT JOIN agenda.reserva_participante rp ON rp.reserva_id = r.id
        LEFT JOIN comercial.compra c ON c.id = rp.compra_id
@@ -56,6 +58,7 @@ export interface DatosCheckout {
   monto: number | null;
   moneda: string | null;
   nequi: string;
+  codigoReferido: string | null;
 }
 
 export async function datosCheckout(db: Db, uuid: string): Promise<DatosCheckout> {
@@ -70,6 +73,7 @@ export async function datosCheckout(db: Db, uuid: string): Promise<DatosCheckout
     monto: f.valor_total === null ? null : Number(f.valor_total),
     moneda: f.moneda,
     nequi: "3113981422",
+    codigoReferido: f.codigo_referido,
   };
 }
 
@@ -104,21 +108,23 @@ export async function simularPago(db: Db, uuid: string): Promise<{ pagoId: numbe
 export interface EstadoPagoWeb {
   estado: "sin_pago" | "en_proceso" | "aprobado" | "rechazado";
   reservaId: number;
+  codigoReferido: string | null;
 }
 
 export async function estadoPagoWeb(db: Db, uuid: string): Promise<EstadoPagoWeb> {
   const f = await buscarReserva(db, uuid);
   const reservaId = Number(f.id);
-  if (f.estado === "confirmada") return { estado: "aprobado", reservaId };
-  if (f.compra_id === null) return { estado: "sin_pago", reservaId };
+  const codigoReferido = f.codigo_referido;
+  if (f.estado === "confirmada") return { estado: "aprobado", reservaId, codigoReferido };
+  if (f.compra_id === null) return { estado: "sin_pago", reservaId, codigoReferido };
 
   const p = await db.query<{ estado: string }>(
     `SELECT estado FROM comercial.pago WHERE compra_id = $1 ORDER BY id DESC LIMIT 1`,
     [Number(f.compra_id)],
   );
   const e = p.rows[0]?.estado;
-  if (e === "verificado") return { estado: "aprobado", reservaId };
-  if (e === "rechazado") return { estado: "rechazado", reservaId };
-  if (e === "registrado") return { estado: "en_proceso", reservaId };
-  return { estado: "sin_pago", reservaId };
+  if (e === "verificado") return { estado: "aprobado", reservaId, codigoReferido };
+  if (e === "rechazado") return { estado: "rechazado", reservaId, codigoReferido };
+  if (e === "registrado") return { estado: "en_proceso", reservaId, codigoReferido };
+  return { estado: "sin_pago", reservaId, codigoReferido };
 }

@@ -1,6 +1,7 @@
 import type { Db } from "../db.js";
 import { ErrorDominio, normalizarErrorDb } from "../errores.js";
 import { profesionalPorDefecto } from "./catalogo.js";
+import * as integraciones from "./integraciones.js";
 
 /**
  * Capa fina sobre las funciones de negocio de `agenda.*` en
@@ -209,11 +210,15 @@ export async function cancelarSesion(
   opts: { reservaId: number; motivo: string; por?: string | null },
 ): Promise<{ estado: string }> {
   try {
-    const r = await db.query<{ estado: string }>(
-      `SELECT agenda.cancelar_reserva($1, $2, $3) AS estado`,
-      [opts.reservaId, opts.motivo, opts.por ?? null],
-    );
-    return { estado: (r.rows[0] as { estado: string }).estado };
+    return await db.tx(async (tx) => {
+      const r = await tx.query<{ estado: string }>(
+        `SELECT agenda.cancelar_reserva($1, $2, $3) AS estado`,
+        [opts.reservaId, opts.motivo, opts.por ?? null],
+      );
+      const estado = (r.rows[0] as { estado: string }).estado;
+      await integraciones.sincronizarEstadoReservaEnSheet(tx, opts.reservaId, estado);
+      return { estado };
+    });
   } catch (err) {
     throw normalizarErrorDb(err);
   }
@@ -282,6 +287,7 @@ export async function modificarSesion(
         // Ya estaba pagada: la nueva nace confirmada, sin nuevo hold.
         await tx.query(`UPDATE agenda.reserva SET estado = 'confirmada', reserva_expira_en = NULL WHERE id = $1`, [nueva]);
         estado = "confirmada";
+        await integraciones.sincronizarEstadoReservaEnSheet(tx, nueva, "confirmada");
       }
       const m = await tx.query<{ valor_total: string }>(`SELECT valor_total FROM comercial.compra WHERE id = $1`, [compraId]);
       montoTotal = m.rows[0] ? Number(m.rows[0].valor_total) : null;

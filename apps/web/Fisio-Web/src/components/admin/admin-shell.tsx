@@ -1,12 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ClipboardList,
   Users,
   Stethoscope,
   Workflow,
-  Plug,
   History,
   BarChart3,
   LogOut,
@@ -23,7 +22,6 @@ const nav = [
   { href: "/admin/clientes", label: "Clientes", icon: Users },
   { href: "/admin/servicios", label: "Servicios", icon: Stethoscope },
   { href: "/admin/automatizaciones", label: "Automatizaciones", icon: Workflow },
-  { href: "/admin/integraciones", label: "Integraciones", icon: Plug },
   { href: "/admin/historial", label: "Historial", icon: History },
   { href: "/admin/indicadores", label: "Indicadores", icon: BarChart3 },
 ];
@@ -31,6 +29,14 @@ const nav = [
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
+  const contenidoRef = useRef<HTMLDivElement>(null);
+
+  // El scroll de `window.scrollTo` en PageTransition no alcanza este panel:
+  // aquí el que se desplaza es este div, no la ventana. Sin esto, cambiar
+  // de página deja la vista nueva en el punto de scroll de la anterior.
+  useEffect(() => {
+    contenidoRef.current?.scrollTo(0, 0);
+  }, [pathname]);
 
   // Función (no JSX ya calculado) porque se monta dos veces -- sidebar de
   // escritorio y menú móvil -- y cada una necesita su propio layoutId para
@@ -68,9 +74,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="flex min-h-screen bg-mist">
-      {/* Sidebar escritorio */}
-      <aside className="hidden w-60 shrink-0 flex-col justify-between border-r border-sky-100 bg-white p-6 lg:flex">
+    <div className="flex h-screen bg-mist">
+      {/* Sidebar escritorio -- fijo, con su propio scroll si el menú crece;
+          el contenido de la derecha tiene el suyo aparte, así cambiar de
+          página nunca deja al sidebar desplazado ni la vista a medio
+          scroll de la página anterior. */}
+      <aside className="hidden w-60 shrink-0 flex-col justify-between overflow-y-auto border-r border-sky-100 bg-white p-6 lg:flex">
         <div>
           <Link to="/" className="group/brand">
             <BrandMark size="sm" />
@@ -89,8 +98,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </Link>
       </aside>
 
-      {/* Contenido */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Contenido -- scroll propio, independiente del sidebar */}
+      <div ref={contenidoRef} className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         {/* Topbar móvil */}
         <div className="flex items-center justify-between border-b border-sky-100 bg-white p-4 lg:hidden">
           <Link to="/" className="group/brand">

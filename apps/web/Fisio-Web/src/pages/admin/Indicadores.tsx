@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { CalendarDays, Wallet, Activity, UserPlus } from "lucide-react";
 import { motion } from "framer-motion";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { PageHeader, Metric, BarRow } from "@/components/admin/kit";
 import { Reveal } from "@/components/site/reveal";
-import { indicadores as k } from "@/lib/data";
+import { indicadores as indicadoresFallback } from "@/lib/data";
+import { api, leerToken, ApiError, type IndicadoresAdminApi } from "@/lib/api";
 import { formatCOP } from "@/lib/utils";
 
 function delta(actual: number, prev: number): string {
@@ -13,15 +16,54 @@ function delta(actual: number, prev: number): string {
 }
 
 export default function AdminIndicadoresPage() {
-  const maxServ = Math.max(...k.citasPorServicio.map((s) => s.valor));
-  const maxCanal = Math.max(...k.reservasPorCanal.map((s) => s.valor));
-  const maxDia = Math.max(...k.citasPorDia.map((s) => s.valor));
+  const [k, setK] = useState<IndicadoresAdminApi>(indicadoresFallback);
+  const [cargando, setCargando] = useState(true);
+  const [enVivo, setEnVivo] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!leerToken()) {
+      navigate("/admin/login");
+      return;
+    }
+    let vivo = true;
+    (async () => {
+      try {
+        setCargando(true);
+        const data = await api.indicadoresAdmin();
+        if (vivo) {
+          setK(data);
+          setEnVivo(true);
+        }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          navigate("/admin/login");
+          return;
+        }
+      } finally {
+        if (vivo) setCargando(false);
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [navigate]);
+
+  const maxServ = Math.max(1, ...k.citasPorServicio.map((s) => s.valor));
+  const maxCanal = Math.max(1, ...k.reservasPorCanal.map((s) => s.valor));
+  const maxDia = Math.max(1, ...k.citasPorDia.map((s) => s.valor));
 
   return (
     <AdminShell>
       <PageHeader
         title="Indicadores"
-        subtitle="Resumen del negocio. Datos de ejemplo hasta conectar Google Sheets y la API."
+        subtitle={
+          cargando
+            ? "Cargando indicadores desde la API núcleo..."
+            : enVivo
+              ? "Calculado en vivo desde reservas y pagos. Falta conectar Google Sheets para el reporte histórico."
+              : "No se pudo conectar con la API núcleo — mostrando datos de ejemplo."
+        }
       />
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -58,6 +100,9 @@ export default function AdminIndicadoresPage() {
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <Reveal variant="left">
           <Panel titulo="Citas por servicio (30 días)">
+            {k.citasPorServicio.length === 0 && (
+              <p className="text-xs text-ink-600">Sin citas registradas en los últimos 30 días.</p>
+            )}
             {k.citasPorServicio.map((s, i) => (
               <BarRow
                 key={s.servicio}
@@ -72,6 +117,9 @@ export default function AdminIndicadoresPage() {
 
         <Reveal variant="right">
           <Panel titulo="Reservas por canal (30 días)">
+            {k.reservasPorCanal.length === 0 && (
+              <p className="text-xs text-ink-600">Sin reservas registradas en los últimos 30 días.</p>
+            )}
             {k.reservasPorCanal.map((s, i) => (
               <BarRow key={s.canal} index={i} label={s.canal} value={s.valor} max={maxCanal} />
             ))}

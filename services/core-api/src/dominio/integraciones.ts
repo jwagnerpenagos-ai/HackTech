@@ -31,6 +31,71 @@ export async function enviarCorreo(
   }
 }
 
+const ETIQUETAS_ESTADO_RESERVA: Record<string, string> = {
+  propuesta: "Propuesta",
+  pendiente_pago: "Pendiente de pago",
+  confirmada: "Confirmada",
+  en_curso: "En curso",
+  atendida: "Atendida",
+  no_asistio: "No asistió",
+  cancelada_tarde: "Cancelada (tarde)",
+  cancelada_a_tiempo: "Cancelada (a tiempo)",
+  expirada: "Expirada",
+  rechazada: "Rechazada",
+};
+
+/**
+ * Respaldo en Sheets del estado de una cita (ver services/google-adapter,
+ * destino='sheets'): confirmación, cancelación, asistencia registrada, etc.
+ * Cada reserva ocupa UNA fila que se sobreescribe en cada cambio — el
+ * mapeo fila↔reserva lo lleva `integracion.google_recurso` del lado del
+ * adaptador, acá solo se encola el evento con el estado ya legible.
+ *
+ * Si la reserva ya no existe o no tiene participante (no debería pasar,
+ * pero no es motivo para tumbar la operación que disparó esto), simplemente
+ * no encola nada.
+ */
+export async function sincronizarEstadoReservaEnSheet(db: Db, reservaId: number, estado: string): Promise<void> {
+  try {
+    const r = await db.query<{
+      paciente: string;
+      servicio: string | null;
+      sede: string | null;
+      inicia_en: string;
+    }>(
+      `SELECT (pa.nombres || ' ' || pa.apellidos) AS paciente,
+              s.nombre AS servicio, se.nombre AS sede,
+              lower(r.franja_clinica) AS inicia_en
+         FROM agenda.reserva r
+         JOIN agenda.reserva_participante rp ON rp.reserva_id = r.id
+         JOIN personas.paciente pa ON pa.id = rp.paciente_id
+         LEFT JOIN catalogo.servicio s ON s.id = r.servicio_id
+         LEFT JOIN catalogo.sede se ON se.id = r.sede_id
+        WHERE r.id = $1
+        LIMIT 1`,
+      [reservaId],
+    );
+    const f = r.rows[0];
+    if (!f) return;
+    await db.query(
+      `INSERT INTO integracion.outbox (agregado_tipo, agregado_id, tipo_evento, destino, payload)
+       VALUES ('reserva', $1, 'reserva.estado_cambiado', 'sheets', $2::jsonb)`,
+      [
+        reservaId,
+        JSON.stringify({
+          fecha: f.inicia_en,
+          paciente: f.paciente,
+          servicio: f.servicio ?? "",
+          sede: f.sede ?? "",
+          estado: ETIQUETAS_ESTADO_RESERVA[estado] ?? estado,
+        }),
+      ],
+    );
+  } catch (err) {
+    throw normalizarErrorDb(err);
+  }
+}
+
 export async function crearCarpeta(db: Db, opts: { carpeta: string }): Promise<{ outboxId: number }> {
   try {
     const r = await db.query<{ id: number }>(

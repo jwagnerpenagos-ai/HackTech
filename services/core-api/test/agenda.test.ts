@@ -90,6 +90,7 @@ describe("dominio/agenda", () => {
     const { db, llamadas } = crearDbFalsa([
       [{ paciente_id: 5, servicio_id: 3, sede_id: 1, estado: "pendiente_pago", compra_id: null }],
       [{ estado: "cancelada_a_tiempo" }], // cancelar_reserva
+      [], // SELECT de sincronizarEstadoReservaEnSheet (sin fila -> no encola nada)
       [{ crear_reserva: 88 }], // crear_reserva
     ]);
     const r = await agenda.modificarSesion(db, {
@@ -98,17 +99,19 @@ describe("dominio/agenda", () => {
       motivo: "x",
     });
     expect(r).toEqual({ reservaId: 88, estado: "pendiente_pago", compraId: null, montoTotal: null });
-    expect(llamadas).toHaveLength(3);
+    expect(llamadas).toHaveLength(4);
   });
 
   it("modificarSesion de una cita PAGADA: mueve la compra y la nueva nace confirmada", async () => {
     const { db } = crearDbFalsa([
       [{ paciente_id: 5, servicio_id: 3, sede_id: 1, estado: "confirmada", compra_id: 20 }],
       [{ estado: "cancelada_a_tiempo" }], // cancelar_reserva
+      [], // SELECT de sincronizarEstadoReservaEnSheet para la reserva vieja (cancelada)
       [{ crear_reserva: 88 }], // crear_reserva
       [], // UPDATE participante viejo -> compra_id NULL
       [], // UPDATE participante nuevo -> compra_id 20
       [], // UPDATE reserva nueva -> confirmada
+      [], // SELECT de sincronizarEstadoReservaEnSheet para la reserva nueva (confirmada)
       [{ valor_total: "150000.00" }], // SELECT valor_total
     ]);
     const r = await agenda.modificarSesion(db, {

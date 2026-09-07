@@ -1,5 +1,6 @@
 import type { Db } from "../db.js";
 import { ErrorDominio, normalizarErrorDb } from "../errores.js";
+import * as integraciones from "./integraciones.js";
 
 /**
  * Registro de asistencia a la cita por parte del personal del consultorio.
@@ -95,6 +96,7 @@ export async function registrarAsistencia(
           WHERE reserva_id = $1 AND asistencia = 'pendiente'`,
         [opts.reservaId, nuevaAsistencia],
       );
+      await integraciones.sincronizarEstadoReservaEnSheet(tx, opts.reservaId, nuevoEstado);
       const r = await tx.query<{
         estado: string;
         servicio: string | null;

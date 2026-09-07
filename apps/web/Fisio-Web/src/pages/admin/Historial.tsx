@@ -1,21 +1,15 @@
 import { useMemo, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Search, Terminal, ShieldAlert } from "lucide-react";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { PageHeader, Badge, TableCard, Th } from "@/components/admin/kit";
 import { Reveal } from "@/components/site/reveal";
-import { operacionesEjemplo, type OperacionLog } from "@/lib/data";
+import { operacionesEjemplo } from "@/lib/data";
+import { api, leerToken, ApiError, type EventoHistorialApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const canales: (OperacionLog["canal"] | "todos")[] = [
-  "todos",
-  "Sitio web",
-  "Telegram",
-  "Panel",
-  "n8n",
-];
-
-const tonoResultado: Record<OperacionLog["resultado"], "verde" | "rojo" | "ambar"> = {
+const tonoResultado: Record<EventoHistorialApi["resultado"], "verde" | "rojo" | "ambar"> = {
   ok: "verde",
   error: "rojo",
   pendiente: "ambar",
@@ -25,69 +19,89 @@ const normalizarTexto = (texto: string) =>
   texto
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[.,\-]/g, "");
+    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
+    .replace(/[.,-]/g, "");
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("es-CO", {
+  return new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
     day: "2-digit",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  }).format(new Date(iso));
 }
 
+// Fallback fuera de línea: la ficha de ejemplo trae canales cerrados
+// ("Sitio web", "Telegram"...); acá se muestran tal cual.
+const eventosFallback: EventoHistorialApi[] = operacionesEjemplo.map((o) => ({
+  id: o.id,
+  fechaHora: o.fechaHora,
+  actor: o.actor,
+  canal: o.canal,
+  accion: o.accion,
+  detalle: o.detalle,
+  resultado: o.resultado,
+}));
+
 export default function AdminHistorialPage() {
-  const [canal, setCanal] = useState<(typeof canales)[number]>("todos");
+  const [canal, setCanal] = useState<string>("todos");
   const [q, setQ] = useState("");
-  const [operaciones, setOperaciones] = useState<OperacionLog[]>([]);
+  const [eventos, setEventos] = useState<EventoHistorialApi[]>([]);
   const [cargando, setCargando] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const cargarHistorial = async () => {
+    if (!leerToken()) {
+      navigate("/admin/login");
+      return;
+    }
+    let vivo = true;
+    (async () => {
       try {
         setCargando(true);
-        const res = await fetch('/api/historial');
-        if (!res.ok) throw new Error('API no disponible');
-        const data = await res.json();
-        setOperaciones(data);
-      } catch {
-        setOperaciones(operacionesEjemplo);
+        const data = await api.historialAdmin();
+        if (vivo) setEventos(data);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          navigate("/admin/login");
+          return;
+        }
+        if (vivo) setEventos(eventosFallback);
       } finally {
-        setCargando(false);
+        if (vivo) setCargando(false);
       }
+    })();
+    return () => {
+      vivo = false;
     };
+  }, [navigate]);
 
-    cargarHistorial();
-  }, []);
+  const canales = useMemo(() => ["todos", ...Array.from(new Set(eventos.map((e) => e.canal)))], [eventos]);
 
   const filtradas = useMemo(() => {
     const term = normalizarTexto(q.trim());
 
-    return [...operaciones]
+    return [...eventos]
       .filter((o) => {
         const coincideCanal = canal === "todos" || o.canal === canal;
         if (!coincideCanal) return false;
         if (!term) return true;
 
-        const actorNorm = normalizarTexto(o.actor);
-        const accionNorm = normalizarTexto(o.accion);
-        const detalleNorm = normalizarTexto(o.detalle);
-
         return (
-          actorNorm.includes(term) ||
-          accionNorm.includes(term) ||
-          detalleNorm.includes(term)
+          normalizarTexto(o.actor).includes(term) ||
+          normalizarTexto(o.accion).includes(term) ||
+          normalizarTexto(o.detalle).includes(term)
         );
       })
       .sort((a, b) => b.fechaHora.localeCompare(a.fechaHora));
-  }, [canal, q, operaciones]);
+  }, [canal, q, eventos]);
 
   return (
     <AdminShell>
       <PageHeader
         title="Historial de operaciones"
-        subtitle="Registro de auditoría de acciones, modificaciones y automatizaciones del sistema."
+        subtitle="Actividad reciente reconstruida desde la base de datos: reservas creadas o canceladas, y pagos registrados o verificados."
         action={
           <div className="relative w-full sm:w-72">
             <Search
@@ -139,7 +153,7 @@ export default function AdminHistorialPage() {
             {cargando ? (
               <tr>
                 <td colSpan={6} className="px-5 py-12 text-center text-xs text-slate-400">
-                  Cargando logs de auditoría...
+                  Cargando actividad reciente...
                 </td>
               </tr>
             ) : (
@@ -155,7 +169,7 @@ export default function AdminHistorialPage() {
                     {o.actor}
                   </td>
                   <td className="px-5 py-3.5 text-slate-600 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 border border-slate-200/60">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-600 border border-slate-200/60 capitalize">
                       <Terminal size={11} className="text-slate-400" />
                       {o.canal}
                     </span>
@@ -191,7 +205,7 @@ export default function AdminHistorialPage() {
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-3.5 text-xs text-slate-500 font-normal flex items-center gap-2">
         <ShieldAlert size={14} className="text-slate-400 shrink-0" />
         <span>
-          Bitácora inalterable. Los registros persistentes se sincronizan automáticamente con el log de seguridad del servidor.
+          Reconstruido a partir de las tablas de reservas y pagos. No hay una bitácora de auditoría independiente todavía.
         </span>
       </div>
     </AdminShell>

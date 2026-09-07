@@ -63,6 +63,7 @@ export async function listarServiciosWeb(db: Db): Promise<ServicioWeb[]> {
 // GET /api/sedes
 // ---------------------------------------------------------------------------
 export interface SedeWeb {
+  id: number;
   codigo: string;
   nombre: string;
   ciudad: string;
@@ -79,10 +80,11 @@ const REGLA_SEDE: Record<string, { dias: number[]; nota: string }> = {
 };
 
 export async function listarSedesWeb(db: Db): Promise<SedeWeb[]> {
-  const r = await db.query<{ codigo: string; nombre: string; ciudad: string; departamento: string }>(
-    `SELECT codigo, nombre, ciudad, departamento FROM catalogo.sede WHERE activo ORDER BY id`,
+  const r = await db.query<{ id: number; codigo: string; nombre: string; ciudad: string; departamento: string }>(
+    `SELECT id, codigo, nombre, ciudad, departamento FROM catalogo.sede WHERE activo ORDER BY id`,
   );
   return r.rows.map((f) => ({
+    id: f.id,
     codigo: f.codigo,
     nombre: f.nombre,
     ciudad: f.ciudad,
@@ -142,6 +144,8 @@ export interface PacienteWebInput {
   genero?: string | null | undefined;
   telefono?: string | null | undefined;
   email?: string | null | undefined;
+  /** Código de referido de quien la invitó (personas.paciente.codigo_referido). Solo aplica al crear paciente nuevo. */
+  codigoReferido?: string | null | undefined;
 }
 
 export interface ReservaWebResultado {
@@ -172,11 +176,25 @@ async function buscarOCrearPaciente(db: Db, p: PacienteWebInput): Promise<{ id: 
   const generoNorm = p.genero ? (GENERO[p.genero.trim().toLowerCase()] ?? null) : null;
   const docCodigo = p.tipoDocumento ? p.tipoDocumento.replace(/[.\s]/g, "").toUpperCase() : null;
 
+  // Código de quien lo invitó: si no matchea a nadie, se ignora en silencio
+  // (un typo en un campo opcional no debe tumbar la reserva).
+  let referenteId: number | null = null;
+  const codigoTrim = p.codigoReferido?.trim();
+  if (codigoTrim) {
+    const ref = await db.query<{ id: number | string }>(
+      `SELECT id FROM personas.paciente WHERE codigo_referido = $1 AND activo LIMIT 1`,
+      [codigoTrim.toUpperCase()],
+    );
+    referenteId = ref.rows[0] ? Number(ref.rows[0].id) : null;
+  }
+
   const r = await db.query<{ id: number | string }>(
     `INSERT INTO personas.paciente
-       (nombres, apellidos, telefono, email, numero_documento, fecha_nacimiento, genero, tipo_documento_id)
+       (nombres, apellidos, telefono, email, numero_documento, fecha_nacimiento, genero, tipo_documento_id,
+        referido_por_paciente_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7,
-             (SELECT id FROM catalogo.tipo_documento WHERE codigo = $8))
+             (SELECT id FROM catalogo.tipo_documento WHERE codigo = $8),
+             $9)
      RETURNING id`,
     [
       nombres,
@@ -187,6 +205,7 @@ async function buscarOCrearPaciente(db: Db, p: PacienteWebInput): Promise<{ id: 
       p.fechaNacimiento ?? null,
       generoNorm,
       docCodigo,
+      referenteId,
     ],
   );
   return { id: Number((r.rows[0] as { id: number | string }).id) };

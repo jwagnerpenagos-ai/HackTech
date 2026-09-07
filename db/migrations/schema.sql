@@ -360,9 +360,13 @@ CREATE TABLE personas.paciente (
     eps_id              smallint REFERENCES catalogo.eps(id),
     eps_otro            text,
 
-    -- Programa de referidos: autorreferencia.
+    -- Programa de referidos: autorreferencia. codigo_referido lo llena solo
+    -- el trigger personas.generar_codigo_referido (ver más abajo) — nunca se
+    -- inserta a mano, así que cualquier vía de alta de paciente (web, bot,
+    -- panel) lo obtiene gratis sin tener que acordarse de generarlo.
     referido_por_paciente_id bigint REFERENCES personas.paciente(id),
     referido_texto_libre     text,
+    codigo_referido          text NOT NULL,
 
     -- Espejo en Google Contacts del Workspace de Lina.
     google_contact_id   text UNIQUE,
@@ -375,8 +379,25 @@ CREATE TABLE personas.paciente (
     CONSTRAINT paciente_ciudad_coherente    CHECK (NOT (ciudad_id    IS NOT NULL AND ciudad_otro    IS NOT NULL)),
     CONSTRAINT paciente_ocupacion_coherente CHECK (NOT (ocupacion_id IS NOT NULL AND ocupacion_otro IS NOT NULL)),
     CONSTRAINT paciente_eps_coherente       CHECK (NOT (eps_id       IS NOT NULL AND eps_otro       IS NOT NULL)),
-    CONSTRAINT paciente_no_se_refiere_a_si_mismo CHECK (referido_por_paciente_id IS DISTINCT FROM id)
+    CONSTRAINT paciente_no_se_refiere_a_si_mismo CHECK (referido_por_paciente_id IS DISTINCT FROM id),
+    CONSTRAINT paciente_codigo_referido_unico UNIQUE (codigo_referido)
 );
+
+-- Genera codigo_referido (4 letras del nombre + id) si no viene ya puesto.
+-- BEFORE INSERT porque el valor de identidad de NEW.id ya está resuelto en
+-- esta etapa, antes de que corran las restricciones de la fila.
+CREATE OR REPLACE FUNCTION personas.generar_codigo_referido() RETURNS trigger AS $$
+BEGIN
+  IF NEW.codigo_referido IS NULL THEN
+    NEW.codigo_referido := upper(left(regexp_replace(public.sin_tildes(NEW.nombres), '[^A-Za-z]', '', 'g') || 'REF', 4)) || lpad(NEW.id::text, 4, '0');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER paciente_codigo_referido_trigger
+  BEFORE INSERT ON personas.paciente
+  FOR EACH ROW EXECUTE FUNCTION personas.generar_codigo_referido();
 
 CREATE INDEX paciente_nombre_trgm_idx ON personas.paciente
     USING gin ((public.sin_tildes(lower(nombres || ' ' || apellidos))) gin_trgm_ops);
@@ -508,7 +529,10 @@ CREATE TYPE agenda.estado_reserva AS ENUM (
     'rechazada'         -- Propuesta de IA descartada
 );
 
-CREATE TYPE agenda.canal_origen AS ENUM ('telegram','web','presencial','whatsapp','admin');
+-- 'email' no es un origen real de reserva (nadie agenda por correo), pero
+-- esta misma enumeración se reutiliza como "canal de mensaje" en
+-- integracion.notificacion/mensaje_canal/propuesta_ia, y ahí sí aplica.
+CREATE TYPE agenda.canal_origen AS ENUM ('telegram','web','presencial','whatsapp','admin','email');
 
 CREATE TABLE agenda.horario_atencion (
     id             integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1214,6 +1238,13 @@ CREATE TABLE integracion.notificacion (
 
 CREATE INDEX notificacion_pendiente_idx ON integracion.notificacion (programada_para)
     WHERE estado = 'pendiente';
+
+-- Idempotencia: un mismo recordatorio no se reclama dos veces aunque el
+-- barrido del bot se solape o se repita. Incluye paciente_id porque una
+-- reserva grupal (cupo_maximo > 1) tiene un participante por fila y cada
+-- uno necesita su propio recordatorio.
+CREATE UNIQUE INDEX notificacion_reserva_paciente_plantilla_uniq ON integracion.notificacion (reserva_id, paciente_id, plantilla)
+    WHERE reserva_id IS NOT NULL AND paciente_id IS NOT NULL;
 
 -- Registro de ejecuciones de n8n, para depurar sin adivinar.
 CREATE TABLE integracion.ejecucion_n8n (

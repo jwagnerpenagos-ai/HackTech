@@ -156,6 +156,8 @@ const ETIQUETA_DATO = new Map<string, string>([
   ["consulta", "qué desea buscar"],
   ["telefono", "su número de teléfono"],
   ["email", "su correo"],
+  ["documento", "su número de documento (cédula)"],
+  ["eps", "su EPS"],
 ]);
 
 function resumen(intencion: string, entidades: Record<string, string | number>): string {
@@ -283,6 +285,12 @@ function llenarFaltante(estado: EstadoConversacion, valor: string): Procesado {
     return {
       estado,
       accion: { tipo: "pedir_dato", texto: "Ese correo no parece válido. Escríbalo así: nombre@correo.com" },
+    };
+  }
+  if (slot === "documento" && valor.trim().length < 4) {
+    return {
+      estado,
+      accion: { tipo: "pedir_dato", texto: "Ese número de documento parece incompleto. Escríbalo de nuevo." },
     };
   }
   return siguientePaso({

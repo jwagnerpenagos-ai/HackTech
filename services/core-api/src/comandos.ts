@@ -316,7 +316,7 @@ export async function ejecutarComando(
                 422,
               );
             }
-            const faltanRegistro = (["cliente", "telefono", "email"] as const).filter(
+            const faltanRegistro = (["cliente", "telefono", "email", "documento", "eps"] as const).filter(
               (campo) => entidades[campo] === undefined || entidades[campo] === null,
             );
             if (faltanRegistro.length > 0) {
@@ -326,7 +326,7 @@ export async function ejecutarComando(
                 error: {
                   codigo: "registro_requerido",
                   mensaje:
-                    "Es su primera cita: necesito su nombre completo, su teléfono y su correo (le enviamos ahí la confirmación).",
+                    "Es su primera cita: necesito su nombre completo, su teléfono, su correo (le enviamos ahí la confirmación), su número de documento y su EPS.",
                   status: 422,
                 },
               };
@@ -335,6 +335,8 @@ export async function ejecutarComando(
               nombreCompleto: exigir(entidades.cliente, "cliente"),
               telefono: exigir(entidades.telefono, "telefono"),
               email: exigir(entidades.email, "email"),
+              documento: exigir(entidades.documento, "documento"),
+              eps: exigir(entidades.eps, "eps"),
               chatId,
             });
           }

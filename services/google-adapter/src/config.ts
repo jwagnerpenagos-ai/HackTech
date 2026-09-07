@@ -24,6 +24,12 @@ const EnvSchema = z.object({
   // una variable de entorno.
   GOOGLE_REFRESH_TOKEN: z.string().optional(),
 
+  // Hoja de cálculo donde se respalda cada reserva confirmada (pestaña
+  // "Reservas", se crea sola si no existe). Sin esto, los eventos
+  // destino='sheets' del outbox simplemente se reintentan hasta agotar
+  // sus intentos: no es obligatorio para que el resto del adaptador funcione.
+  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().optional(),
+
   OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(500).max(60_000).default(5000),
   OUTBOX_LOTE: z.coerce.number().int().min(1).max(100).default(20),
 

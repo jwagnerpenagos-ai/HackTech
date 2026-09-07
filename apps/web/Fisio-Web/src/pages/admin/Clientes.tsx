@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Search,
   X,
@@ -11,21 +12,19 @@ import {
   CheckCircle2,
   FileText,
   User,
-  Lock,
-  Calendar,
-  Activity,
   AlertCircle,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { PageHeader, Badge } from "@/components/admin/kit";
 import { Reveal } from "@/components/site/reveal";
-import {
-  pacientesEjemplo,
-  reservasEjemplo,
-  type PacienteEjemplo,
-} from "@/lib/data";
-import { cn } from "@/lib/utils";
+import { pacientesEjemplo } from "@/lib/data";
+import { HistoriaClinicaModal } from "@/components/admin/historia-clinica-modal";
+import { ExportMenu } from "@/components/admin/export-menu";
+import { exportarExcel, exportarPDF } from "@/lib/reportes";
+import { api, leerToken, ApiError, type PacienteAdminApi, type CitaAdminApi } from "@/lib/api";
+type PacienteEjemplo = PacienteAdminApi;
+import { cn, partesDeContacto, combinarContacto } from "@/lib/utils";
 
 const normalizarTexto = (texto: string) =>
   texto
@@ -34,71 +33,83 @@ const normalizarTexto = (texto: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[.,\-]/g, "");
 
-// Estructura simulada para la historia clínica en modo solo lectura
-interface HistoriaClinica {
-  antecedentes: string;
-  motivoConsulta: string;
-  diagnosticoFisioterapeutico: string;
-  evolucionSesiones: {
-    fecha: string;
-    nota: string;
-    fisioterapeuta: string;
-  }[];
-}
 
-const historiaClinicaEjemplo: HistoriaClinica = {
-  antecedentes: "Sin alergias conocidas. Cirugía de LCA en rodilla derecha (2022).",
-  motivoConsulta: "Dolor lumbar persistente post-ejercicio y restricción de movilidad.",
-  diagnosticoFisioterapeutico: "Lumbago mecánico con tensión en la musculatura paravertebral.",
-  evolucionSesiones: [
-    {
-      fecha: "15 Ago 2026",
-      nota: "Evaluación inicial. Liberación miofascial y ejercicios de control motor.",
-      fisioterapeuta: "Dra. Laura Borda",
-    },
-    {
-      fecha: "28 Ago 2026",
-      nota: "Disminución del dolor a 3/10. Se incrementa carga de ejercicio terapéutico.",
-      fisioterapeuta: "Dra. Laura Borda",
-    },
-  ],
-};
+// Fallback fuera de línea: la ficha de ejemplo no trae id numérico ni
+// contacto de emergencia combinado, así que se adapta a la forma real.
+const pacientesFallback: PacienteEjemplo[] = pacientesEjemplo.map((p, i) => ({
+  id: i + 1,
+  nombre: p.nombre,
+  documento: p.documento,
+  telefono: p.telefono,
+  email: p.email,
+  ciudad: p.ciudad,
+  eps: p.eps,
+  ocupacion: p.ocupacion,
+  contactoEmergencia: p.contactoEmergencia,
+  referido: p.referido ?? null,
+  referidosEfectivos: p.referidosEfectivos,
+  ultimaSesion: p.ultimaSesion,
+}));
 
 export default function AdminClientesPage() {
   const [q, setQ] = useState("");
   const [listaPacientes, setListaPacientes] = useState<PacienteEjemplo[]>([]);
+  const [citas, setCitas] = useState<CitaAdminApi[]>([]);
   const [cargando, setCargando] = useState(true);
   const [sel, setSel] = useState<PacienteEjemplo | null>(null);
+  const [pacienteModal, setPacienteModal] = useState<PacienteEjemplo | null>(null);
 
   // Control de Pestañas (Datos vs Historia Clínica)
   const [tabActiva, setTabActiva] = useState<"datos" | "historia">("datos");
 
   const [editando, setEditando] = useState(false);
   const [datosEdit, setDatosEdit] = useState<PacienteEjemplo | null>(null);
+  const [contactoForm, setContactoForm] = useState({ nombre: "", parentesco: "", telefono: "" });
   const [guardadoExitoso, setGuardadoExitoso] = useState(false);
+  const navigate = useNavigate();
 
-  // Cargar clientes de API o Fallback
+  // Cargar clientes reales de core-api. Sin sesión -> al login.
   useEffect(() => {
-    const cargarClientes = async () => {
+    if (!leerToken()) {
+      navigate("/admin/login");
+      return;
+    }
+    let vivo = true;
+    (async () => {
       try {
         setCargando(true);
-        const res = await fetch("/api/pacientes");
-        if (!res.ok) throw new Error("API no disponible");
-        const data = await res.json();
-        setListaPacientes(data);
-      } catch {
-        setListaPacientes(pacientesEjemplo);
+        const hace1a = new Date();
+        hace1a.setFullYear(hace1a.getFullYear() - 1);
+        const en1a = new Date();
+        en1a.setFullYear(en1a.getFullYear() + 1);
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        const [pacientes, citasApi] = await Promise.all([
+          api.pacientesAdmin(),
+          api.citas(fmt(hace1a), fmt(en1a)),
+        ]);
+        if (vivo) {
+          setListaPacientes(pacientes);
+          setCitas(citasApi);
+        }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          navigate("/admin/login");
+          return;
+        }
+        if (vivo) setListaPacientes(pacientesFallback);
       } finally {
-        setCargando(false);
+        if (vivo) setCargando(false);
       }
+    })();
+    return () => {
+      vivo = false;
     };
-
-    cargarClientes();
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (sel) {
       setDatosEdit({ ...sel });
+      setContactoForm(partesDeContacto(sel.contactoEmergencia));
       setEditando(false);
       setGuardadoExitoso(false);
       setTabActiva("datos");
@@ -109,47 +120,148 @@ export default function AdminClientesPage() {
 
   const citasPorPaciente = useMemo(() => {
     const map = new Map<string, number>();
-    for (const r of reservasEjemplo)
-      map.set(r.cliente, (map.get(r.cliente) ?? 0) + 1);
+    for (const c of citas) if (c.paciente) map.set(c.paciente, (map.get(c.paciente) ?? 0) + 1);
     return map;
-  }, []);
+  }, [citas]);
+
+  const ciudades = useMemo(
+    () => Array.from(new Set(listaPacientes.map((p) => p.ciudad).filter((c): c is string => !!c))).sort(),
+    [listaPacientes],
+  );
+  const epsList = useMemo(
+    () => Array.from(new Set(listaPacientes.map((p) => p.eps).filter((e): e is string => !!e))).sort(),
+    [listaPacientes],
+  );
+
+  const [filtroCiudad, setFiltroCiudad] = useState("todas");
+  const [filtroEps, setFiltroEps] = useState("todas");
+  const [filtroActividad, setFiltroActividad] = useState<"todos" | "activos" | "inactivos" | "sin_sesiones">("todos");
+  const [filtroReferidos, setFiltroReferidos] = useState<"todos" | "con" | "elegibles">("todos");
+
+  const filtrosActivos =
+    filtroCiudad !== "todas" || filtroEps !== "todas" || filtroActividad !== "todos" || filtroReferidos !== "todos";
+
+  function limpiarFiltros() {
+    setFiltroCiudad("todas");
+    setFiltroEps("todas");
+    setFiltroActividad("todos");
+    setFiltroReferidos("todos");
+  }
+
+  const fmtFechaCorta = (iso: string | null) =>
+    iso
+      ? new Intl.DateTimeFormat("es-CO", { timeZone: "America/Bogota", day: "2-digit", month: "short", year: "numeric" }).format(
+          new Date(iso),
+        )
+      : "Sin sesiones";
+
+  async function exportarExcelClientes() {
+    await exportarExcel("clientes", [
+      {
+        nombre: "Clientes",
+        filas: filtrados.map((p) => ({
+          Nombre: p.nombre,
+          Documento: p.documento,
+          Teléfono: p.telefono ?? "",
+          Correo: p.email ?? "",
+          Ciudad: p.ciudad ?? "",
+          EPS: p.eps ?? "",
+          Ocupación: p.ocupacion ?? "",
+          "Contacto de emergencia": p.contactoEmergencia ?? "",
+          "Última sesión": fmtFechaCorta(p.ultimaSesion),
+          Citas: citasPorPaciente.get(p.nombre) ?? 0,
+        })),
+      },
+    ]);
+  }
+
+  async function exportarPdfClientes() {
+    await exportarPDF({
+      base: "clientes",
+      titulo: "Listado de clientes",
+      subtitulo: `${filtrados.length} de ${listaPacientes.length} pacientes con ficha registrada`,
+      meta: filtrosActivos ? ["Incluye los filtros activos en pantalla."] : [],
+      columnas: ["Nombre", "Documento", "Teléfono", "Ciudad", "EPS", "Última sesión", "Citas"],
+      filas: filtrados.map((p) => [
+        p.nombre,
+        p.documento,
+        p.telefono ?? "—",
+        p.ciudad ?? "—",
+        p.eps ?? "—",
+        fmtFechaCorta(p.ultimaSesion),
+        citasPorPaciente.get(p.nombre) ?? 0,
+      ]),
+    });
+  }
+
+  const DIAS_ACTIVO = 60;
 
   const filtrados = useMemo(() => {
     const term = normalizarTexto(q.trim());
+    const ahora = Date.now();
     return listaPacientes.filter((p) => {
-      if (!term) return true;
-      const nombreNorm = normalizarTexto(p.nombre);
-      const docNorm = normalizarTexto(p.documento);
-      const telNorm = normalizarTexto(p.telefono);
-      return (
-        nombreNorm.includes(term) ||
-        docNorm.includes(term) ||
-        telNorm.includes(term)
-      );
+      if (term) {
+        const nombreNorm = normalizarTexto(p.nombre);
+        const docNorm = normalizarTexto(p.documento);
+        const telNorm = normalizarTexto(p.telefono ?? "");
+        if (!nombreNorm.includes(term) && !docNorm.includes(term) && !telNorm.includes(term)) return false;
+      }
+      if (filtroCiudad !== "todas" && p.ciudad !== filtroCiudad) return false;
+      if (filtroEps !== "todas" && p.eps !== filtroEps) return false;
+      if (filtroReferidos === "con" && p.referidosEfectivos < 1) return false;
+      if (filtroReferidos === "elegibles" && p.referidosEfectivos < 5) return false;
+      if (filtroActividad !== "todos") {
+        const diasDesdeUltima = p.ultimaSesion
+          ? (ahora - new Date(p.ultimaSesion).getTime()) / (1000 * 60 * 60 * 24)
+          : null;
+        if (filtroActividad === "sin_sesiones" && diasDesdeUltima !== null) return false;
+        if (filtroActividad === "activos" && (diasDesdeUltima === null || diasDesdeUltima > DIAS_ACTIVO)) return false;
+        if (filtroActividad === "inactivos" && (diasDesdeUltima === null || diasDesdeUltima <= DIAS_ACTIVO))
+          return false;
+      }
+      return true;
     });
-  }, [q, listaPacientes]);
+  }, [q, listaPacientes, filtroCiudad, filtroEps, filtroActividad, filtroReferidos]);
+
+  const [errorGuardado, setErrorGuardado] = useState<string | null>(null);
 
   const manejarGuardar = async () => {
     if (!datosEdit) return;
+    setErrorGuardado(null);
 
+    let contactoEmergencia: string | null;
     try {
-      await fetch(`/api/pacientes/${datosEdit.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(datosEdit),
-      });
-    } catch {
-      console.warn("Actualización ejecutada en memoria local.");
+      contactoEmergencia = combinarContacto(contactoForm);
+    } catch (e) {
+      setErrorGuardado(e instanceof Error ? e.message : "Contacto de emergencia inválido.");
+      return;
     }
 
-    setListaPacientes((prev) =>
-      prev.map((p) => (p.id === datosEdit.id ? datosEdit : p))
-    );
-    setSel(datosEdit);
-    setEditando(false);
-    setGuardadoExitoso(true);
-
-    setTimeout(() => setGuardadoExitoso(false), 3000);
+    try {
+      const actualizado = await api.actualizarPaciente(datosEdit.id, {
+        nombre: datosEdit.nombre,
+        telefono: datosEdit.telefono,
+        email: datosEdit.email,
+        ciudad: datosEdit.ciudad,
+        eps: datosEdit.eps,
+        ocupacion: datosEdit.ocupacion,
+        referido: datosEdit.referido,
+        contactoEmergencia,
+      });
+      setListaPacientes((prev) => prev.map((p) => (p.id === actualizado.id ? actualizado : p)));
+      setSel(actualizado);
+      setEditando(false);
+      setGuardadoExitoso(true);
+      setTimeout(() => setGuardadoExitoso(false), 3000);
+      return;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        navigate("/admin/login");
+        return;
+      }
+      setErrorGuardado(err instanceof ApiError ? err.message : "No se pudo conectar con la API núcleo.");
+      return;
+    }
   };
 
   return (
@@ -172,6 +284,71 @@ export default function AdminClientesPage() {
           </div>
         }
       />
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <select
+          value={filtroCiudad}
+          onChange={(e) => setFiltroCiudad(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-brand-700 focus:outline-none"
+        >
+          <option value="todas">Todas las ciudades</option>
+          {ciudades.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filtroEps}
+          onChange={(e) => setFiltroEps(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-brand-700 focus:outline-none"
+        >
+          <option value="todas">Todas las EPS</option>
+          {epsList.map((e) => (
+            <option key={e} value={e}>
+              {e}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filtroActividad}
+          onChange={(e) => setFiltroActividad(e.target.value as typeof filtroActividad)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-brand-700 focus:outline-none"
+        >
+          <option value="todos">Cualquier actividad</option>
+          <option value="activos">Activos (últimos {DIAS_ACTIVO} días)</option>
+          <option value="inactivos">Inactivos (+{DIAS_ACTIVO} días sin venir)</option>
+          <option value="sin_sesiones">Sin sesiones registradas</option>
+        </select>
+
+        <select
+          value={filtroReferidos}
+          onChange={(e) => setFiltroReferidos(e.target.value as typeof filtroReferidos)}
+          className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-brand-700 focus:outline-none"
+        >
+          <option value="todos">Referidos: todos</option>
+          <option value="con">Con al menos 1 referido</option>
+          <option value="elegibles">Elegibles para 10% OFF (5+)</option>
+        </select>
+
+        {filtrosActivos && (
+          <button
+            type="button"
+            onClick={limpiarFiltros}
+            className="text-xs font-medium text-brand-800 hover:text-brand-900 hover:underline"
+          >
+            Limpiar filtros
+          </button>
+        )}
+
+        <span className="ml-auto text-xs text-slate-400">
+          {filtrados.length} de {listaPacientes.length}
+        </span>
+
+        <ExportMenu onExcel={exportarExcelClientes} onPdf={exportarPdfClientes} disabled={filtrados.length === 0} />
+      </div>
 
       {cargando ? (
         <div className="p-12 text-center text-xs text-slate-400">
@@ -202,7 +379,7 @@ export default function AdminClientesPage() {
                         {p.nombre}
                       </p>
                       <p className="truncate text-xs text-slate-500 font-normal mt-0.5">
-                        Doc: {p.documento} · {p.ciudad} · EPS: {p.eps}
+                        Doc: {p.documento} · {p.ciudad ?? "Ciudad no registrada"} · EPS: {p.eps ?? "—"}
                       </p>
                     </div>
                   </div>
@@ -310,18 +487,10 @@ export default function AdminClientesPage() {
                     <User size={14} /> Datos Personales
                   </button>
                   <button
-                    onClick={() => {
-                      setTabActiva("historia");
-                      setEditando(false);
-                    }}
-                    className={cn(
-                      "flex items-center gap-1.5 py-2.5 px-4 border-b-2 transition cursor-pointer",
-                      tabActiva === "historia"
-                        ? "border-brand-800 text-brand-800"
-                        : "border-transparent text-slate-500 hover:text-slate-700"
-                    )}
+                    onClick={() => setPacienteModal(sel)}
+                    className="flex items-center gap-1.5 py-2.5 px-4 text-slate-500 hover:text-brand-800 transition cursor-pointer"
                   >
-                    <FileText size={14} /> Historia Clínica
+                    <FileText size={14} /> Historia Clínica completa
                   </button>
                 </div>
 
@@ -329,6 +498,13 @@ export default function AdminClientesPage() {
                   <div className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800">
                     <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
                     <span>Información actualizada correctamente.</span>
+                  </div>
+                )}
+
+                {errorGuardado && (
+                  <div className="mt-4 flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800">
+                    <AlertCircle size={15} className="text-rose-600 shrink-0" />
+                    <span>{errorGuardado}</span>
                   </div>
                 )}
 
@@ -359,10 +535,9 @@ export default function AdminClientesPage() {
                             <input
                               type="text"
                               value={datosEdit.documento}
-                              onChange={(e) =>
-                                setDatosEdit({ ...datosEdit, documento: e.target.value })
-                              }
-                              className="w-full rounded-lg border border-slate-200 p-2 text-xs text-slate-900 focus:border-brand-800 focus:outline-none"
+                              readOnly
+                              title="El documento se edita desde la base de datos, no desde el panel."
+                              className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs text-slate-500 cursor-not-allowed"
                             />
                           </div>
                           <div>
@@ -371,7 +546,7 @@ export default function AdminClientesPage() {
                             </label>
                             <input
                               type="text"
-                              value={datosEdit.telefono}
+                              value={datosEdit.telefono ?? ""}
                               onChange={(e) =>
                                 setDatosEdit({ ...datosEdit, telefono: e.target.value })
                               }
@@ -386,7 +561,7 @@ export default function AdminClientesPage() {
                           </label>
                           <input
                             type="email"
-                            value={datosEdit.email}
+                            value={datosEdit.email ?? ""}
                             onChange={(e) =>
                               setDatosEdit({ ...datosEdit, email: e.target.value })
                             }
@@ -401,7 +576,7 @@ export default function AdminClientesPage() {
                             </label>
                             <input
                               type="text"
-                              value={datosEdit.ciudad}
+                              value={datosEdit.ciudad ?? ""}
                               onChange={(e) =>
                                 setDatosEdit({ ...datosEdit, ciudad: e.target.value })
                               }
@@ -414,7 +589,7 @@ export default function AdminClientesPage() {
                             </label>
                             <input
                               type="text"
-                              value={datosEdit.eps}
+                              value={datosEdit.eps ?? ""}
                               onChange={(e) =>
                                 setDatosEdit({ ...datosEdit, eps: e.target.value })
                               }
@@ -429,7 +604,7 @@ export default function AdminClientesPage() {
                           </label>
                           <input
                             type="text"
-                            value={datosEdit.ocupacion}
+                            value={datosEdit.ocupacion ?? ""}
                             onChange={(e) =>
                               setDatosEdit({ ...datosEdit, ocupacion: e.target.value })
                             }
@@ -441,17 +616,32 @@ export default function AdminClientesPage() {
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">
                             Contacto de Emergencia
                           </label>
-                          <input
-                            type="text"
-                            value={datosEdit.contactoEmergencia}
-                            onChange={(e) =>
-                              setDatosEdit({
-                                ...datosEdit,
-                                contactoEmergencia: e.target.value,
-                              })
-                            }
-                            className="w-full rounded-lg border border-slate-200 p-2 text-xs text-slate-900 focus:border-brand-800 focus:outline-none"
-                          />
+                          <div className="grid grid-cols-3 gap-2">
+                            <input
+                              type="text"
+                              placeholder="Nombre"
+                              value={contactoForm.nombre}
+                              onChange={(e) => setContactoForm({ ...contactoForm, nombre: e.target.value })}
+                              className="w-full rounded-lg border border-slate-200 p-2 text-xs text-slate-900 focus:border-brand-800 focus:outline-none"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Parentesco"
+                              value={contactoForm.parentesco}
+                              onChange={(e) => setContactoForm({ ...contactoForm, parentesco: e.target.value })}
+                              className="w-full rounded-lg border border-slate-200 p-2 text-xs text-slate-900 focus:border-brand-800 focus:outline-none"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Teléfono"
+                              value={contactoForm.telefono}
+                              onChange={(e) => setContactoForm({ ...contactoForm, telefono: e.target.value })}
+                              className="w-full rounded-lg border border-slate-200 p-2 text-xs text-slate-900 focus:border-brand-800 focus:outline-none"
+                            />
+                          </div>
+                          <p className="mt-1 text-[10px] text-slate-400">
+                            Ej: Pedro Torres · Padre · 3105550100. Deja los 3 vacíos si no aplica.
+                          </p>
                         </div>
 
                         <div>
@@ -496,10 +686,22 @@ export default function AdminClientesPage() {
                         </div>
 
                         <Dl>
-                          <Row k="EPS / Aseguradora" v={sel.eps} />
-                          <Row k="Ocupación / Perfil" v={sel.ocupacion} />
-                          <Row k="Contacto de emergencia" v={sel.contactoEmergencia} />
-                          <Row k="Última sesión" v={sel.ultimaSesion} />
+                          <Row k="EPS / Aseguradora" v={sel.eps ?? "—"} />
+                          <Row k="Ocupación / Perfil" v={sel.ocupacion ?? "—"} />
+                          <Row k="Contacto de emergencia" v={sel.contactoEmergencia ?? "—"} />
+                          <Row
+                            k="Última sesión"
+                            v={
+                              sel.ultimaSesion
+                                ? new Intl.DateTimeFormat("es-CO", {
+                                    timeZone: "America/Bogota",
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                  }).format(new Date(sel.ultimaSesion))
+                                : "Sin sesiones registradas"
+                            }
+                          />
                           <Row k="¿Quién lo refirió?" v={sel.referido ?? "—"} />
                         </Dl>
 
@@ -531,89 +733,6 @@ export default function AdminClientesPage() {
                   </>
                 )}
 
-                {/* CONTENIDO PESTAÑA 2: HISTORIA CLÍNICA (SOLO LECTURA) */}
-                {tabActiva === "historia" && (
-                  <div className="mt-5 space-y-4 text-xs">
-                    {/* Badge indicando Solo Lectura */}
-                    <div className="flex items-center justify-between rounded-xl bg-amber-50 border border-amber-200 p-3 text-amber-800">
-                      <div className="flex items-center gap-2">
-                        <Lock size={15} className="text-amber-700 shrink-0" />
-                        <span className="font-semibold text-[11px]">
-                          Modo Solo Lectura
-                        </span>
-                      </div>
-                      <span className="text-[10px] bg-amber-200/60 px-2 py-0.5 rounded-md font-mono text-amber-900">
-                        Historial Protegido
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 space-y-3">
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
-                          Antecedentes Médicos
-                        </span>
-                        <p className="text-slate-800 leading-relaxed font-normal bg-white p-2.5 rounded-lg border border-slate-200/60">
-                          {historiaClinicaEjemplo.antecedentes}
-                        </p>
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
-                          Motivo de Consulta Inicial
-                        </span>
-                        <p className="text-slate-800 leading-relaxed font-normal bg-white p-2.5 rounded-lg border border-slate-200/60">
-                          {historiaClinicaEjemplo.motivoConsulta}
-                        </p>
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
-                          Diagnóstico Fisioterapéutico
-                        </span>
-                        <p className="text-slate-800 leading-relaxed font-semibold bg-white p-2.5 rounded-lg border border-slate-200/60 text-brand-900">
-                          {historiaClinicaEjemplo.diagnosticoFisioterapeutico}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Registro de Evolución */}
-                    <div className="pt-2">
-                      <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5 mb-3">
-                        <Activity size={14} className="text-brand-800" />
-                        Evolución de Sesiones
-                      </h4>
-
-                      <div className="space-y-3">
-                        {historiaClinicaEjemplo.evolucionSesiones.map((sesion, idx) => (
-                          <div
-                            key={idx}
-                            className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs"
-                          >
-                            <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                              <span className="flex items-center gap-1.5 font-semibold text-slate-900 text-[11px]">
-                                <Calendar size={13} className="text-brand-700" />
-                                {sesion.fecha}
-                              </span>
-                              <span className="text-[10px] text-slate-500 font-medium">
-                                {sesion.fisioterapeuta}
-                              </span>
-                            </div>
-                            <p className="text-slate-600 leading-relaxed text-xs">
-                              {sesion.nota}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 rounded-xl bg-slate-100 p-3 text-slate-500 text-[11px]">
-                      <AlertCircle size={14} className="shrink-0" />
-                      <span>
-                        Para registrar una nueva sesión o modificar la historia clínica, dirígete al módulo clínico de atención.
-                      </span>
-                    </div>
-                  </div>
-                )}
               </div>
 
               <div className="mt-6 rounded-xl bg-slate-100/70 p-3 text-center text-xs text-slate-500 font-normal">
@@ -623,6 +742,16 @@ export default function AdminClientesPage() {
           </motion.div>
         )}
       </AnimatePresence>
+      {pacienteModal && (
+        <HistoriaClinicaModal
+          paciente={pacienteModal}
+          onClose={() => setPacienteModal(null)}
+          onPacienteActualizado={(p) => {
+            setPacienteModal(p);
+            setListaPacientes((prev) => prev.map((x) => (x.id === p.id ? p : x)));
+          }}
+        />
+      )}
     </AdminShell>
   );
 }

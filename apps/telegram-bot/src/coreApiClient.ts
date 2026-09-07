@@ -47,6 +47,100 @@ const AsistenciaRegistrada = z.object({
 });
 export type AsistenciaRegistrada = z.infer<typeof AsistenciaRegistrada>;
 
+const RecordatorioPendiente = z.object({
+  reservaId: z.number(),
+  pacienteId: z.number(),
+  paciente: z.string(),
+  servicio: z.string().nullable(),
+  sede: z.string().nullable(),
+  iniciaEn: z.string(),
+  chatId: z.string().nullable(),
+  pacienteEmail: z.string().nullable(),
+});
+export type RecordatorioPendiente = z.infer<typeof RecordatorioPendiente>;
+
+const CitaHoy = z.object({
+  reservaId: z.number(),
+  pacienteId: z.number().nullable(),
+  estado: z.string(),
+  iniciaEn: z.string(),
+  terminaEn: z.string(),
+  servicio: z.string().nullable(),
+  sede: z.string(),
+  paciente: z.string().nullable(),
+  telefono: z.string().nullable(),
+  canal: z.string(),
+});
+export type CitaHoy = z.infer<typeof CitaHoy>;
+
+const AntecedenteResumen = z.object({
+  nombre: z.string(),
+  detalle: z.string().nullable(),
+  esBanderaRoja: z.boolean(),
+});
+
+const AnamnesisResumen = z.object({
+  motivoConsulta: z.string().nullable(),
+  enfermedadActual: z.string().nullable(),
+  inicioSintomas: z.string().nullable(),
+  objetivosTerapeuticos: z.string().nullable(),
+  registradoEn: z.string(),
+});
+
+const VitalesResumen = z.object({
+  sistolica: z.number().nullable(),
+  diastolica: z.number().nullable(),
+  frecuenciaCardiaca: z.number().nullable(),
+  saturacionO2: z.number().nullable(),
+  imc: z.number().nullable(),
+  requiereAtencion: z.boolean(),
+  tomadoEn: z.string(),
+});
+
+const DolorResumen = z.object({
+  intensidad: z.number(),
+  clasificacion: z.string(),
+  localizacion: z.string().nullable(),
+  zona: z.string().nullable(),
+  evaluadoEn: z.string(),
+});
+
+const EvolucionResumen = z.object({
+  subjetivo: z.string().nullable(),
+  objetivo: z.string().nullable(),
+  analisis: z.string().nullable(),
+  plan: z.string().nullable(),
+  registradoEn: z.string(),
+});
+
+const CitaResumen = z.object({
+  estado: z.string(),
+  iniciaEn: z.string(),
+  servicio: z.string().nullable(),
+  sede: z.string(),
+});
+
+const HistoriaResumen = z.object({
+  pacienteId: z.number(),
+  nombreCompleto: z.string(),
+  telefono: z.string().nullable(),
+  email: z.string().nullable(),
+  antecedentes: z.array(AntecedenteResumen),
+  anamnesisUltima: AnamnesisResumen.nullable(),
+  vitalesUltima: VitalesResumen.nullable(),
+  dolorUltima: DolorResumen.nullable(),
+  evolucionesRecientes: z.array(EvolucionResumen),
+  citasRecientes: z.array(CitaResumen),
+});
+export type HistoriaResumen = z.infer<typeof HistoriaResumen>;
+
+const ResultadoHistoriaResumen = z.discriminatedUnion("tipo", [
+  z.object({ tipo: z.literal("no_encontrado") }),
+  z.object({ tipo: z.literal("ambiguo"), candidatos: z.array(z.object({ id: z.number(), nombreCompleto: z.string() })) }),
+  z.object({ tipo: z.literal("encontrado"), resumen: HistoriaResumen }),
+]);
+export type ResultadoHistoriaResumen = z.infer<typeof ResultadoHistoriaResumen>;
+
 const RespuestaOk = z.object({ ok: z.literal(true), datos: z.unknown() });
 
 export type ResultadoCoreApi<T> = { ok: true; datos: T } | { ok: false; motivo: "red" | "http" | "respuesta_invalida" };
@@ -91,6 +185,17 @@ export interface ClienteCoreApi {
     cfg: Config,
     p: { reservaId: number; asistio: boolean; por: string },
   ): Promise<ResultadoCoreApi<AsistenciaRegistrada>>;
+  recordatoriosReclamar(cfg: Config): Promise<ResultadoCoreApi<{ recordatorios: RecordatorioPendiente[] }>>;
+  recordatorioMarcarEnviado(
+    cfg: Config,
+    p: { reservaId: number; pacienteId: number; ok: boolean; error?: string | null },
+  ): Promise<ResultadoCoreApi<{ ok: true }>>;
+  recordatorioEnviarEmail(
+    cfg: Config,
+    p: { reservaId: number; pacienteId: number },
+  ): Promise<ResultadoCoreApi<{ enviado: boolean }>>;
+  citasHoy(cfg: Config): Promise<ResultadoCoreApi<{ citas: CitaHoy[] }>>;
+  historiaResumen(cfg: Config, nombre: string): Promise<ResultadoCoreApi<ResultadoHistoriaResumen>>;
 }
 
 export const coreApi: ClienteCoreApi = {
@@ -141,6 +246,40 @@ export const coreApi: ClienteCoreApi = {
     const r = await pedir(cfg, "/asistencia", { reserva_id: p.reservaId, asistio: p.asistio, por: p.por });
     if (!r.ok) return r;
     const d = AsistenciaRegistrada.safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async recordatoriosReclamar(cfg) {
+    const r = await pedir(cfg, "/recordatorios/reclamar", {});
+    if (!r.ok) return r;
+    const d = z.object({ recordatorios: z.array(RecordatorioPendiente) }).safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async recordatorioMarcarEnviado(cfg, p) {
+    const r = await pedir(cfg, "/recordatorios/marcar-enviado", {
+      reserva_id: p.reservaId,
+      paciente_id: p.pacienteId,
+      ok: p.ok,
+      error: p.error ?? null,
+    });
+    if (!r.ok) return r;
+    return { ok: true, datos: { ok: true } };
+  },
+  async recordatorioEnviarEmail(cfg, p) {
+    const r = await pedir(cfg, "/recordatorios/enviar-email", { reserva_id: p.reservaId, paciente_id: p.pacienteId });
+    if (!r.ok) return r;
+    const d = z.object({ enviado: z.boolean() }).safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async citasHoy(cfg) {
+    const r = await pedir(cfg, "/citas/hoy");
+    if (!r.ok) return r;
+    const d = z.object({ citas: z.array(CitaHoy) }).safeParse(r.datos);
+    return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
+  },
+  async historiaResumen(cfg, nombre) {
+    const r = await pedir(cfg, `/historia?nombre=${encodeURIComponent(nombre)}`);
+    if (!r.ok) return r;
+    const d = ResultadoHistoriaResumen.safeParse(r.datos);
     return d.success ? { ok: true, datos: d.data } : { ok: false, motivo: "respuesta_invalida" };
   },
 };

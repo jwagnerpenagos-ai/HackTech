@@ -30,6 +30,10 @@ export function CountUp({
       setDisplay(value);
       return;
     }
+    // Si `value` cambia después de la primera animación (ej.: datos de
+    // ejemplo reemplazados por datos reales de la API), hay que permitir
+    // que vuelva a animar -- si no, se queda congelado en el valor viejo.
+    started.current = false;
     const [, prefix, numStr, suffix] = match;
     const target = parseInt(numStr.replace(/[.,]/g, ""), 10);
 

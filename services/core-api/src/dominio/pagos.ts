@@ -150,6 +150,12 @@ export async function verificarPago(
         [opts.pagoId],
       );
 
+      // Respaldo en Sheets de cada cita que acaba de confirmarse (ver
+      // services/google-adapter, destino='sheets').
+      for (const f of r.rows) {
+        await integraciones.sincronizarEstadoReservaEnSheet(tx, Number(f.reserva_id), "confirmada");
+      }
+
       // Correo "su cita quedó confirmada" a quien dejó un email.
       for (const f of r.rows) {
         if (!f.paciente_email) continue;

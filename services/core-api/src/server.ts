@@ -10,6 +10,9 @@ import { ejecutarComando } from "./comandos.js";
 import { ErrorDominio } from "./errores.js";
 import * as pagos from "./dominio/pagos.js";
 import * as asistencia from "./dominio/asistencia.js";
+import * as notificaciones from "./dominio/notificaciones.js";
+import * as admin from "./web/admin.js";
+import * as historiaResumen from "./dominio/historiaResumen.js";
 import { registrarRutasWeb } from "./web/rutas.js";
 
 /** Comparación de tiempo constante entre el header y el secreto esperado. */
@@ -175,6 +178,64 @@ export function construirServidor(cfg: Config = loadConfig(), db: Db = construir
         asistio: b.data.asistio,
         por: b.data.por ?? null,
       }),
+    );
+  });
+
+  // --- Agenda del día y resumen de historia clínica para /hoy y /historia ---
+  // del bot (comandos directos de staff, sin pasar por NLU). X-Internal-Key.
+  app.get("/citas/hoy", async (_req, reply) =>
+    conDominio(reply, async () => {
+      const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date());
+      const desdeIso = `${hoy}T00:00:00-05:00`;
+      const hastaDate = new Date(desdeIso);
+      hastaDate.setUTCDate(hastaDate.getUTCDate() + 1);
+      const citas = await admin.listarCitasAdmin(db, { desdeIso, hastaIso: hastaDate.toISOString() });
+      return { citas };
+    }),
+  );
+
+  app.get("/historia", async (req, reply) => {
+    const q = z.object({ nombre: z.string().trim().min(1).max(120) }).safeParse(req.query);
+    if (!q.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () => historiaResumen.resumenHistoria(db, q.data.nombre));
+  });
+
+  // --- Recordatorios de cita (ver dominio/notificaciones.ts) ---
+  // El bot barre periódicamente; el guard sigue siendo X-Internal-Key.
+  const RecordatorioResultadoBody = z.object({
+    reserva_id: z.coerce.number().int().positive(),
+    paciente_id: z.coerce.number().int().positive(),
+    ok: z.boolean(),
+    error: z.string().max(300).nullish(),
+  });
+  const RecordatorioEmailBody = z.object({
+    reserva_id: z.coerce.number().int().positive(),
+    paciente_id: z.coerce.number().int().positive(),
+  });
+
+  app.post("/recordatorios/reclamar", async (_req, reply) =>
+    conDominio(reply, async () => ({ recordatorios: await notificaciones.reclamarRecordatorios24h(db) })),
+  );
+
+  app.post("/recordatorios/marcar-enviado", async (req, reply) => {
+    const b = RecordatorioResultadoBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, async () => {
+      await notificaciones.marcarRecordatorioResultado(db, {
+        reservaId: b.data.reserva_id,
+        pacienteId: b.data.paciente_id,
+        ok: b.data.ok,
+        error: b.data.error ?? null,
+      });
+      return { ok: true };
+    });
+  });
+
+  app.post("/recordatorios/enviar-email", async (req, reply) => {
+    const b = RecordatorioEmailBody.safeParse(req.body);
+    if (!b.success) return reply.code(422).send({ ok: false, error: "cuerpo_invalido" });
+    return conDominio(reply, () =>
+      notificaciones.enviarRecordatorioPorEmail(db, { reservaId: b.data.reserva_id, pacienteId: b.data.paciente_id }),
     );
   });
 

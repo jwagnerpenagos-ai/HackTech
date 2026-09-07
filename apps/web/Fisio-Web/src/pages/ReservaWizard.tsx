@@ -74,7 +74,7 @@ const fichaSchema = z
       .regex(telefonoRegex, "Solo números, espacios y + ( ) -"),
     motivo: z.string().min(1, "Selecciona un motivo"),
     motivoDetalle: z.string().trim().max(400, "Máximo 400 caracteres").optional(),
-    referido: z.string().trim().max(80, "Máximo 80 caracteres").optional(),
+    codigoReferido: z.string().trim().max(20, "Máximo 20 caracteres").optional(),
     notas: z.string().trim().max(300, "Máximo 300 caracteres").optional(),
     empresa: z.string().max(0, "").optional(),
   })
@@ -181,6 +181,7 @@ export function ReservaWizard() {
             genero: data.genero,
             telefono: data.telefono,
             email: data.email,
+            codigoReferido: data.codigoReferido,
           },
         },
         idempotencyKey,
@@ -703,8 +704,13 @@ export function ReservaWizard() {
                 </Field>
 
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="¿Quién te refirió? (opcional)" error={errors.referido?.message}>
-                    <input {...register("referido")} maxLength={80} className="fisio-input" />
+                  <Field label="Código de quien te invitó (opcional)" error={errors.codigoReferido?.message}>
+                    <input
+                      {...register("codigoReferido")}
+                      maxLength={20}
+                      placeholder="Ej: CARL0008"
+                      className="fisio-input uppercase"
+                    />
                   </Field>
 
                   <Field label="Notas adicionales (opcional)" error={errors.notas?.message}>

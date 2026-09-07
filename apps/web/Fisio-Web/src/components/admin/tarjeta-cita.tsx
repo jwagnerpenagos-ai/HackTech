@@ -3,6 +3,11 @@ import { User, CheckCircle2, XCircle, Calendar, Activity } from 'lucide-react';
 
 export interface PropiedadesTarjetaCita {
   id: string;
+  pacienteId: number | null;
+  /** ISO completo, para agrupar/ordenar por día. No se muestra tal cual. */
+  iniciaEnIso: string;
+  /** ISO completo del fin, para calcular la altura del bloque en la vista calendario. */
+  terminaEnIso: string;
   nombrePaciente: string;
   hora: string;
   servicio: string;
@@ -12,6 +17,15 @@ export interface PropiedadesTarjetaCita {
   alCancelar?: (id: string) => void;
   alVerHistoriaClinica?: (cita: PropiedadesTarjetaCita) => void;
 }
+
+// Borde de color por estado: el diferenciador visual para distinguir de
+// un vistazo sin depender solo del badge de texto.
+const BORDE_ESTADO: Record<PropiedadesTarjetaCita['estado'], string> = {
+  pendiente: 'border-l-amber-400',
+  confirmada: 'border-l-emerald-500',
+  completada: 'border-l-blue-500',
+  cancelada: 'border-l-rose-400',
+};
 
 export const TarjetaCita: React.FC<PropiedadesTarjetaCita> = (props) => {
   const {
@@ -27,7 +41,9 @@ export const TarjetaCita: React.FC<PropiedadesTarjetaCita> = (props) => {
   } = props;
 
   return (
-    <div className="bg-white p-4 rounded-xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between gap-3">
+    <div
+      className={`bg-white p-4 rounded-xl border border-l-4 ${BORDE_ESTADO[estado]} border-slate-200/80 shadow-xs hover:shadow-md transition-all flex flex-col justify-between gap-3`}
+    >
       <div className="space-y-1">
         <div className="flex items-center gap-1.5 text-xs font-mono font-medium text-slate-600 bg-slate-100/80 px-2.5 py-1 rounded-md w-fit border border-slate-200/60">
           <Calendar size={12} className="text-slate-400 shrink-0" />
@@ -55,18 +71,18 @@ export const TarjetaCita: React.FC<PropiedadesTarjetaCita> = (props) => {
           {alConfirmar && (
             <button
               onClick={() => alConfirmar(id)}
-              className="flex-1 flex items-center justify-center gap-1 py-1.5 px-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium transition cursor-pointer"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-sm font-semibold shadow-sm transition cursor-pointer"
             >
-              <CheckCircle2 size={13} /> Confirmar
+              <CheckCircle2 size={16} /> Confirmar pago
             </button>
           )}
           {alCancelar && (
             <button
               onClick={() => alCancelar(id)}
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+              className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
               title="Cancelar cita"
             >
-              <XCircle size={15} />
+              <XCircle size={18} />
             </button>
           )}
         </div>

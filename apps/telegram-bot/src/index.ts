@@ -3,6 +3,7 @@ import { logger } from "./logger.js";
 import { crearBot } from "./bot.js";
 import { coreApi } from "./coreApiClient.js";
 import { iniciarVigilanciaPagos } from "./telegram/vigilanciaPagos.js";
+import { iniciarVigilanciaRecordatorios } from "./telegram/vigilanciaRecordatorios.js";
 
 function main(): void {
   const cfg = loadConfig();
@@ -18,10 +19,14 @@ function main(): void {
   // web (ver telegram/vigilanciaPagos.ts).
   const detenerVigilancia = iniciarVigilanciaPagos(bot, { cfg, cApi: coreApi });
 
+  // Recordatorio de cita 24h antes (ver telegram/vigilanciaRecordatorios.ts).
+  const detenerRecordatorios = iniciarVigilanciaRecordatorios(bot, { cfg, cApi: coreApi });
+
   for (const señal of ["SIGINT", "SIGTERM"] as const) {
     process.once(señal, () => {
       logger.info(`${señal} recibido, deteniendo el bot…`);
       detenerVigilancia();
+      detenerRecordatorios();
       void bot.stop();
     });
   }

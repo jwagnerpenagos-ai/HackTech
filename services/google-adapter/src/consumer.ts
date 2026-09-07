@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Db } from "./db.js";
-import type { CalendarClient, EventoCalendar, GmailClient } from "./googleClients.js";
+import type { CalendarClient, EventoCalendar, GmailClient, SheetsClient } from "./googleClients.js";
 import * as outbox from "./dominio/outbox.js";
 import type { EventoOutbox } from "./dominio/outbox.js";
 import * as citas from "./dominio/citas.js";
@@ -9,6 +9,8 @@ import * as recursos from "./dominio/recursos.js";
 export interface ClientesGoogle {
   gmail: GmailClient;
   calendar: CalendarClient;
+  sheets?: SheetsClient | undefined;
+  sheetsSpreadsheetId?: string | undefined;
 }
 
 const PayloadCorreoSchema = z.object({
@@ -20,6 +22,14 @@ const PayloadCorreoSchema = z.object({
 const PayloadCalendarSchema = z.object({
   reserva_id: z.number(),
   accion: z.enum(["upsert", "eliminar"]),
+});
+
+const PayloadSheetsSchema = z.object({
+  fecha: z.string(),
+  paciente: z.string(),
+  servicio: z.string(),
+  sede: z.string(),
+  estado: z.string(),
 });
 
 async function procesarGmail(gmail: GmailClient, evento: EventoOutbox): Promise<void> {
@@ -80,6 +90,33 @@ async function procesarCalendar(
   });
 }
 
+const HOJA_RESERVAS = "Reservas";
+
+/**
+ * Sin GOOGLE_SHEETS_SPREADSHEET_ID configurado, estos eventos se reintentan
+ * hasta agotar sus intentos y quedar `fallido` — no bloquean Gmail/Calendar.
+ *
+ * Una reserva tiene UNA fila que se sobreescribe en cada cambio de estado
+ * (confirmada, cancelada, atendida...), en vez de acumular una fila por
+ * evento: `integracion.google_recurso` recuerda en qué fila quedó cada
+ * reserva la primera vez que se escribió.
+ */
+async function procesarSheets(db: Db, clientes: ClientesGoogle, evento: EventoOutbox): Promise<void> {
+  if (!clientes.sheets || !clientes.sheetsSpreadsheetId) {
+    throw new Error("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado: no se puede respaldar en Sheets.");
+  }
+  const payload = PayloadSheetsSchema.parse(evento.payload);
+  const valores: (string | number)[] = [payload.fecha, payload.paciente, payload.servicio, payload.sede, payload.estado];
+
+  const existente = await recursos.buscarFilaSheetReserva(db, evento.agregadoId);
+  if (existente) {
+    await clientes.sheets.actualizarFila(clientes.sheetsSpreadsheetId, existente.hoja, existente.fila, valores);
+    return;
+  }
+  const { fila } = await clientes.sheets.agregarFila(clientes.sheetsSpreadsheetId, HOJA_RESERVAS, valores);
+  await recursos.guardarFilaSheetReserva(db, evento.agregadoId, { hoja: HOJA_RESERVAS, fila });
+}
+
 async function procesarUnEvento(
   db: Db,
   clientes: ClientesGoogle,
@@ -93,6 +130,8 @@ async function procesarUnEvento(
     await procesarGmail(clientes.gmail, evento);
   } else if (evento.destino === "calendar") {
     await procesarCalendar(db, clientes.calendar, evento, zonaHoraria);
+  } else if (evento.destino === "sheets") {
+    await procesarSheets(db, clientes, evento);
   } else {
     throw new Error(
       `Este consumidor no maneja destino="${evento.destino ?? "null"}" (tipo_evento="${evento.tipoEvento}").`,

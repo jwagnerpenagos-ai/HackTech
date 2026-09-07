@@ -59,12 +59,14 @@ describe("resolverPorChatId", () => {
 });
 
 describe("crearPacienteConVinculo", () => {
-  it("crea el paciente y el vínculo en una transacción", async () => {
-    const { db, llamadas } = crearDbFalsa([[{ id: 42 }], []]);
+  it("crea el paciente y el vínculo en una transacción (documento nuevo)", async () => {
+    const { db, llamadas } = crearDbFalsa([[], [{ id: 42 }], []]);
     const r = await crearPacienteConVinculo(db, {
       nombreCompleto: "Laura Gómez",
       telefono: "3001234567",
       email: "laura@correo.com",
+      documento: "1234567890",
+      eps: "Sura",
       chatId: 111,
     });
     expect(r).toEqual({
@@ -74,15 +76,44 @@ describe("crearPacienteConVinculo", () => {
       email: "laura@correo.com",
     });
     expect(llamadas[0]?.texto).toContain("personas.paciente");
-    expect(llamadas[0]?.valores).toEqual(["Laura", "Gómez", "3001234567", "laura@correo.com"]);
+    expect(llamadas[0]?.valores).toEqual(["1234567890"]);
+    expect(llamadas[1]?.texto).toContain("personas.paciente");
+    expect(llamadas[1]?.valores).toEqual(["Laura", "Gómez", "3001234567", "laura@correo.com", "1234567890", "Sura"]);
+    expect(llamadas[2]?.texto).toContain("personas.vinculo_telegram");
+    expect(llamadas[2]?.valores).toEqual([111, 42]);
+  });
+
+  it("documento ya existente: reutiliza el paciente, no lo vuelve a crear", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [{ id: 7, nombre_completo: "Laura Gómez", telefono: "3001234567", email: "laura@correo.com" }],
+      [],
+    ]);
+    const r = await crearPacienteConVinculo(db, {
+      nombreCompleto: "Laura Gómez Otra Vez",
+      telefono: "3009999999",
+      documento: "1234567890",
+      chatId: 333,
+    });
+    expect(r).toEqual({
+      id: 7,
+      nombreCompleto: "Laura Gómez",
+      telefono: "3001234567",
+      email: "laura@correo.com",
+    });
+    expect(llamadas).toHaveLength(2);
     expect(llamadas[1]?.texto).toContain("personas.vinculo_telegram");
-    expect(llamadas[1]?.valores).toEqual([111, 42]);
+    expect(llamadas[1]?.valores).toEqual([333, 7]);
   });
 
   it("nombre sin apellido: apellidos repite nombres", async () => {
-    const { db, llamadas } = crearDbFalsa([[{ id: 43 }], []]);
-    await crearPacienteConVinculo(db, { nombreCompleto: "Laura", telefono: "3001234567", chatId: 222 });
-    expect(llamadas[0]?.valores).toEqual(["Laura", "Laura", "3001234567", null]);
+    const { db, llamadas } = crearDbFalsa([[], [{ id: 43 }], []]);
+    await crearPacienteConVinculo(db, {
+      nombreCompleto: "Laura",
+      telefono: "3001234567",
+      documento: "9999999999",
+      chatId: 222,
+    });
+    expect(llamadas[1]?.valores).toEqual(["Laura", "Laura", "3001234567", null, "9999999999", null]);
   });
 });
 

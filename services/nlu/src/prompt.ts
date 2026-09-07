@@ -107,7 +107,7 @@ export function construirSystemPrompt(hoy: string, tz: string, contexto: string[
     `4. fecha en formato YYYY-MM-DD; hora en HH:MM de 24 horas. Hoy es ${hoy} (zona ${tz}).`,
     '   Resuelve expresiones como "mañana" o "el viernes" contra esa fecha.',
     "5. entidades permitidas: cliente, servicio, sede, fecha, hora, sesion_id, destinatario,",
-    "   asunto, texto, carpeta, consulta, telefono, email. Ninguna otra clave.",
+    "   asunto, texto, carpeta, consulta, telefono, email, documento, eps. Ninguna otra clave.",
     "6. faltantes: lista de esas entidades que la intención necesita y el mensaje NO aportó.",
     "7. confianza: qué tan seguro estás de la clasificación, de 0 a 1.",
     '8. respuesta: SOLO cuando intencion="charla_general". Breve (2-4 líneas), en español de Colombia,',

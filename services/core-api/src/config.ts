@@ -42,6 +42,12 @@ const EnvSchema = z.object({
   CORE_API_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(120),
   CORE_API_RATE_LIMIT_WINDOW: z.string().min(1).default("1 minute"),
 
+  // Salud de servicios vecinos, solo para /api/admin/integraciones (panel).
+  // core-api no les habla en ninguna otra ruta del dominio.
+  N8N_URL: z.string().min(1).default("http://localhost:5678"),
+  GOOGLE_ADAPTER_URL: z.string().min(1).default("http://localhost:8200"),
+  OLLAMA_URL: z.string().min(1).default("http://localhost:11434"),
+
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

@@ -18,7 +18,7 @@ export const IndicadoresCitas: React.FC<PropiedadesIndicadores> = ({
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
         <div>
-          <p className="text-xs text-slate-500 font-medium">Citas Hoy</p>
+          <p className="text-xs text-slate-500 font-medium">Citas de la Semana</p>
           <h3 className="text-2xl font-bold text-slate-800 mt-1">{totalCitas}</h3>
         </div>
         <div className="p-3 bg-slate-100 text-slate-600 rounded-lg">

@@ -2,7 +2,12 @@ import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { construirDb, cerrarDb } from "./db.js";
 import { construirServidor } from "./server.js";
-import { construirOAuth2Client, construirGmailClient, construirCalendarClient } from "./googleClients.js";
+import {
+  construirOAuth2Client,
+  construirGmailClient,
+  construirCalendarClient,
+  construirSheetsClient,
+} from "./googleClients.js";
 import { procesarPendientes } from "./consumer.js";
 
 async function main(): Promise<void> {
@@ -21,7 +26,17 @@ async function main(): Promise<void> {
     );
   } else {
     const auth = construirOAuth2Client(cfg, cfg.GOOGLE_REFRESH_TOKEN);
-    const clientes = { gmail: construirGmailClient(auth), calendar: construirCalendarClient(auth) };
+    const clientes = {
+      gmail: construirGmailClient(auth),
+      calendar: construirCalendarClient(auth),
+      sheets: construirSheetsClient(auth),
+      sheetsSpreadsheetId: cfg.GOOGLE_SHEETS_SPREADSHEET_ID,
+    };
+    if (!cfg.GOOGLE_SHEETS_SPREADSHEET_ID) {
+      logger.warn(
+        "GOOGLE_SHEETS_SPREADSHEET_ID no configurado: los respaldos de reservas en Sheets quedarán en 'fallido' hasta que se agregue.",
+      );
+    }
 
     let enCurso = false;
     const tick = (): void => {

@@ -33,6 +33,8 @@ describe("registrarAsistencia", () => {
     const { db, llamadas } = crearDbFalsa([
       [{ id: 20 }], // UPDATE reserva ... RETURNING id
       [], // UPDATE reserva_participante
+      [{ paciente: "Ana Ríos", servicio: "Valoración inicial", sede: "Sede Tunja", inicia_en: "2026-11-20T20:00:00.000Z" }], // SELECT para sincronizarEstadoReservaEnSheet
+      [], // INSERT integracion.outbox
       [{ estado: "atendida", servicio: "Valoración inicial", inicia_en: "2026-11-20T20:00:00.000Z", chat_id: "500" }],
     ]);
     const r = await registrarAsistencia(db, { reservaId: 20, asistio: true, por: "111" });
@@ -54,6 +56,8 @@ describe("registrarAsistencia", () => {
   it("asistio=false marca no_asistio", async () => {
     const { db, llamadas } = crearDbFalsa([
       [{ id: 20 }],
+      [],
+      [{ paciente: "Ana Ríos", servicio: "Valoración inicial", sede: "Sede Tunja", inicia_en: "2026-11-20T20:00:00.000Z" }],
       [],
       [{ estado: "no_asistio", servicio: "Valoración inicial", inicia_en: "2026-11-20T20:00:00.000Z", chat_id: null }],
     ]);

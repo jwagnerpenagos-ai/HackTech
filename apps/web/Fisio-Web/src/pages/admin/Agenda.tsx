@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Loader2, Search, X, Calendar, Activity, User, CheckCircle, Save,
-  FileText, AlertCircle, Stethoscope
-} from 'lucide-react';
+import { Loader2, Search, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AdminShell } from '../../components/admin/admin-shell';
 import { IndicadoresCitas } from '../../components/admin/indicadores-cita';
 import { TarjetaCita } from '../../components/admin/tarjeta-cita';
 import type { PropiedadesTarjetaCita } from '../../components/admin/tarjeta-cita';
-import { reservasEjemplo, pacientesEjemplo, type PacienteEjemplo } from '@/lib/data';
-import { api, leerToken, ApiError, type CitaAdminApi } from '@/lib/api';
+import { CalendarioSemana } from '../../components/admin/calendario-semana';
+import { HistoriaClinicaModal } from '../../components/admin/historia-clinica-modal';
+import { reservasEjemplo } from '@/lib/data';
+import { api, leerToken, ApiError, type CitaAdminApi, type PacienteAdminApi } from '@/lib/api';
 
 const normalizarTexto = (texto: string) =>
   texto
@@ -30,14 +29,15 @@ function aTarjeta(c: CitaAdminApi): PropiedadesTarjetaCita {
   const inicio = new Date(c.iniciaEn);
   const hora = new Intl.DateTimeFormat('es-CO', {
     timeZone: 'America/Bogota',
-    day: '2-digit',
-    month: 'short',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   }).format(inicio);
   return {
     id: String(c.reservaId),
+    pacienteId: c.pacienteId,
+    iniciaEnIso: c.iniciaEn,
+    terminaEnIso: c.terminaEn,
     nombrePaciente: c.paciente ?? 'Sin paciente',
     hora: `${hora} \u00b7 ${c.sede}`,
     servicio: c.servicio ?? 'Cita',
@@ -46,22 +46,52 @@ function aTarjeta(c: CitaAdminApi): PropiedadesTarjetaCita {
   };
 }
 
+// --- Navegaci\u00f3n por semana (Lun-Dom, ancla en Am\u00e9rica/Bogot\u00e1) --------------
+
+function bogotaHoy(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+}
+function sumarDias(fechaIso: string, dias: number): string {
+  const d = new Date(`${fechaIso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+function inicioSemana(fechaIso: string): string {
+  const dow = new Date(`${fechaIso}T00:00:00Z`).getUTCDay();
+  return sumarDias(fechaIso, dow === 0 ? -6 : 1 - dow);
+}
+function fechaBogotaDeIso(iso: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date(iso));
+}
+const DIAS_SEMANA = ['Lunes', 'Martes', 'Mi\u00e9rcoles', 'Jueves', 'Viernes', 'S\u00e1bado', 'Domingo'];
+
+function formatoRangoSemana(inicio: string, fin: string): string {
+  const dIni = new Date(`${inicio}T00:00:00Z`);
+  const dFin = new Date(`${fin}T00:00:00Z`);
+  const mesFmt = new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', month: 'long' });
+  const mesIni = mesFmt.format(dIni);
+  const mesFin = mesFmt.format(dFin);
+  const diaIni = dIni.getUTCDate();
+  const diaFin = dFin.getUTCDate();
+  const anio = dFin.getUTCFullYear();
+  return mesIni === mesFin
+    ? `${diaIni} \u2013 ${diaFin} de ${mesFin} de ${anio}`
+    : `${diaIni} de ${mesIni} \u2013 ${diaFin} de ${mesFin} de ${anio}`;
+}
+
 export const Agenda: React.FC = () => {
-  const [modoVista, setModoVista] = useState<'tablero' | 'lista'>('tablero');
+  const [modoVista, setModoVista] = useState<'calendario' | 'tablero' | 'lista'>('calendario');
   const [q, setQ] = useState('');
   const [listaCitas, setListaCitas] = useState<PropiedadesTarjetaCita[]>([]);
   const [cargando, setCargando] = useState<boolean>(true);
-  
-  const [historiaSeleccionada, setHistoriaSeleccionada] = useState<{
-    cita: PropiedadesTarjetaCita;
-    paciente?: PacienteEjemplo;
-  } | null>(null);
+  const [semanaInicio, setSemanaInicio] = useState(() => inicioSemana(bogotaHoy()));
 
-  const [comentarioTemp, setComentarioTemp] = useState('');
+  const [pacienteModal, setPacienteModal] = useState<PacienteAdminApi | null>(null);
+  const [reservaContextoModal, setReservaContextoModal] = useState<number | null>(null);
   const navigate = useNavigate();
 
-  // Carga inicial desde core-api. Sin sesión -> al login. Si la API falla por
-  // otra razón, se muestran datos de ejemplo para no dejar el panel vacío.
+  // Carga por semana desde core-api. Sin sesión -> al login. Si la API falla
+  // por otra razón, se muestran datos de ejemplo para no dejar el panel vacío.
   useEffect(() => {
     if (!leerToken()) {
       navigate('/admin/login');
@@ -71,7 +101,7 @@ export const Agenda: React.FC = () => {
     (async () => {
       try {
         setCargando(true);
-        const citas = await api.citas();
+        const citas = await api.citas(semanaInicio, sumarDias(semanaInicio, 7));
         if (vivo) setListaCitas(citas.map(aTarjeta));
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
@@ -82,8 +112,11 @@ export const Agenda: React.FC = () => {
           setListaCitas(
             reservasEjemplo.map((r) => ({
               id: r.id,
+              pacienteId: null,
+              iniciaEnIso: `${r.fecha}T${r.hora}:00-05:00`,
+              terminaEnIso: `${r.fecha}T${r.hora}:00-05:00`,
               nombrePaciente: r.cliente,
-              hora: `${r.fecha} - ${r.hora}`,
+              hora: r.hora,
               servicio: r.servicio,
               estado: r.estado as PropiedadesTarjetaCita['estado'],
               notas: '',
@@ -97,7 +130,7 @@ export const Agenda: React.FC = () => {
     return () => {
       vivo = false;
     };
-  }, [navigate]);
+  }, [navigate, semanaInicio]);
 
   const citasFiltradas = useMemo(() => {
     const term = normalizarTexto(q.trim());
@@ -109,8 +142,30 @@ export const Agenda: React.FC = () => {
         const servicioNorm = normalizarTexto(cita.servicio);
         return pacienteNorm.includes(term) || servicioNorm.includes(term);
       })
-      .sort((a, b) => b.hora.localeCompare(a.hora));
+      .sort((a, b) => a.iniciaEnIso.localeCompare(b.iniciaEnIso));
   }, [q, listaCitas]);
+
+  // Las canceladas no ocupan agenda real: por defecto se sacan de la vista
+  // principal (calendario/por día/lista) para que no estorben, y se pueden
+  // revisar aparte en el desplegable de abajo.
+  const [mostrarCanceladas, setMostrarCanceladas] = useState(false);
+  const citasVisibles = useMemo(
+    () => citasFiltradas.filter((c) => c.estado !== 'cancelada'),
+    [citasFiltradas],
+  );
+
+  // Agrupadas por día de la semana seleccionada, para que ninguna columna
+  // crezca sin límite aunque haya cientos de citas confirmadas en total.
+  const diasSemana = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const fecha = sumarDias(semanaInicio, i);
+      return {
+        fecha,
+        etiqueta: DIAS_SEMANA[i]!,
+        citas: citasVisibles.filter((c) => fechaBogotaDeIso(c.iniciaEnIso) === fecha),
+      };
+    });
+  }, [citasVisibles, semanaInicio]);
 
   const manejarConfirmacion = async (idCita: string) => {
     try {
@@ -134,48 +189,20 @@ export const Agenda: React.FC = () => {
     }
   };
 
-  const abrirHistoriaClinica = (cita: PropiedadesTarjetaCita) => {
-    const pacienteEncontrado = pacientesEjemplo.find(
-      (p) => normalizarTexto(p.nombre) === normalizarTexto(cita.nombrePaciente)
-    );
-    setHistoriaSeleccionada({
-      cita,
-      paciente: pacienteEncontrado,
-    });
-    setComentarioTemp(cita.notas || '');
-  };
-
-  const guardarNotasYCompletar = async (completar = false) => {
-    if (!historiaSeleccionada) return;
-
-    const idCita = historiaSeleccionada.cita.id;
-    const nuevoEstado = completar ? 'completada' : historiaSeleccionada.cita.estado;
-
-    if (completar) {
-      try {
-        await api.asistenciaCita(Number(idCita), true);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) navigate('/admin/login');
-      }
-    }
-    // Las notas de la sesión son del módulo de historia clínica (aún sin API);
-    // por ahora se guardan en el estado local del panel.
-
-    setListaCitas((previas) =>
-      previas.map((c) =>
-        c.id === idCita
-          ? { ...c, notas: comentarioTemp, estado: nuevoEstado }
-          : c
-      )
-    );
-
-    if (completar) {
-      setHistoriaSeleccionada(null);
+  const abrirHistoriaClinica = async (cita: PropiedadesTarjetaCita) => {
+    if (!cita.pacienteId) return;
+    try {
+      const pacientes = await api.pacientesAdmin();
+      const encontrado = pacientes.find((p) => p.id === cita.pacienteId);
+      if (!encontrado) return;
+      setPacienteModal(encontrado);
+      setReservaContextoModal(Number(cita.id));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) navigate('/admin/login');
     }
   };
 
   const citasPendientes = citasFiltradas.filter(cita => cita.estado === 'pendiente');
-  const citasConfirmadas = citasFiltradas.filter(cita => cita.estado === 'confirmada');
   const citasCompletadas = citasFiltradas.filter(cita => cita.estado === 'completada');
   const citasCanceladas = citasFiltradas.filter(cita => cita.estado === 'cancelada');
 
@@ -203,15 +230,23 @@ export const Agenda: React.FC = () => {
             </div>
 
             <div className="bg-white border border-slate-200 rounded-lg p-1 flex gap-1 shadow-sm">
-              <button 
+              <button
+                onClick={() => setModoVista('calendario')}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition cursor-pointer ${
+                  modoVista === 'calendario' ? 'bg-brand-800 text-white' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Calendario
+              </button>
+              <button
                 onClick={() => setModoVista('tablero')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition cursor-pointer ${
                   modoVista === 'tablero' ? 'bg-brand-800 text-white' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                Tablero
+                Por día
               </button>
-              <button 
+              <button
                 onClick={() => setModoVista('lista')}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition cursor-pointer ${
                   modoVista === 'lista' ? 'bg-brand-800 text-white' : 'text-slate-600 hover:bg-slate-100'
@@ -223,97 +258,149 @@ export const Agenda: React.FC = () => {
           </div>
         </div>
 
-        <IndicadoresCitas 
+        <IndicadoresCitas
           totalCitas={citasFiltradas.length}
           pendientes={citasPendientes.length}
           completadas={citasCompletadas.length}
           canceladas={citasCanceladas.length}
         />
 
+        <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-2.5 shadow-sm">
+          <button
+            onClick={() => setSemanaInicio((s) => sumarDias(s, -7))}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer"
+            title="Semana anterior"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-slate-800 capitalize">
+              {formatoRangoSemana(semanaInicio, sumarDias(semanaInicio, 6))}
+            </span>
+            {semanaInicio !== inicioSemana(bogotaHoy()) && (
+              <button
+                onClick={() => setSemanaInicio(inicioSemana(bogotaHoy()))}
+                className="rounded-full border border-brand-200 bg-brand-50 px-2.5 py-0.5 text-xs font-medium text-brand-800 hover:bg-brand-100 transition cursor-pointer"
+              >
+                Hoy
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => setSemanaInicio((s) => sumarDias(s, 7))}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer"
+            title="Semana siguiente"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        {citasCanceladas.length > 0 && (
+          <div className="mt-3 rounded-xl border border-rose-100 bg-rose-50/40">
+            <button
+              onClick={() => setMostrarCanceladas((v) => !v)}
+              className="flex w-full items-center justify-between px-4 py-2 text-left cursor-pointer"
+            >
+              <span className="text-xs font-medium text-rose-700">
+                {citasCanceladas.length} {citasCanceladas.length === 1 ? 'cita cancelada' : 'citas canceladas'} esta
+                semana
+              </span>
+              <span className="text-xs text-rose-500 underline">
+                {mostrarCanceladas ? 'Ocultar' : 'Ver'}
+              </span>
+            </button>
+            {mostrarCanceladas && (
+              <table className="w-full border-t border-rose-100 text-left text-xs">
+                <thead>
+                  <tr className="text-[10px] font-semibold uppercase tracking-wide text-rose-400">
+                    <th className="px-4 pt-2.5 pb-1.5 font-semibold">Paciente</th>
+                    <th className="px-4 pt-2.5 pb-1.5 font-semibold whitespace-nowrap">Fecha / hora</th>
+                    <th className="px-4 pt-2.5 pb-1.5 font-semibold">Servicio</th>
+                    <th className="px-4 pt-2.5 pb-1.5 font-semibold text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rose-100">
+                  {citasCanceladas.map((cita) => (
+                    <tr key={cita.id}>
+                      <td className="px-4 py-2 font-medium text-slate-700">{cita.nombrePaciente}</td>
+                      <td className="px-4 py-2 whitespace-nowrap text-slate-500">
+                        {new Intl.DateTimeFormat('es-CO', {
+                          timeZone: 'America/Bogota',
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        }).format(new Date(cita.iniciaEnIso))}
+                      </td>
+                      <td className="px-4 py-2 text-slate-500">{cita.servicio}</td>
+                      <td className="px-4 py-2 text-right">
+                        <button
+                          onClick={() => abrirHistoriaClinica(cita)}
+                          className="font-medium text-brand-800 hover:underline cursor-pointer"
+                        >
+                          Ver
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
         {cargando ? (
           <div className="flex justify-center items-center py-20 text-slate-500 gap-2">
             <Loader2 className="w-6 h-6 animate-spin text-slate-700" />
             <span className="text-sm font-medium">Cargando citas...</span>
           </div>
+        ) : modoVista === 'calendario' ? (
+          <CalendarioSemana
+            dias={diasSemana}
+            alConfirmar={manejarConfirmacion}
+            alCancelar={manejarCancelacion}
+            alVerHistoriaClinica={abrirHistoriaClinica}
+          />
         ) : modoVista === 'tablero' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-6">
-            <div className="bg-slate-100/80 p-4 rounded-xl border-t-4 border-amber-400 space-y-3">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-semibold text-slate-700 text-sm">Por Confirmar</h3>
-                <span className="bg-white text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold border">{citasPendientes.length}</span>
+          <div className="mt-6 space-y-5">
+            {diasSemana.map((dia) => (
+              <div key={dia.fecha} className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="flex items-baseline justify-between border-b border-slate-100 pb-2.5 mb-3">
+                  <h3 className="font-semibold text-slate-800 text-sm">
+                    {dia.etiqueta}{' '}
+                    <span className="font-normal text-slate-400">
+                      ·{' '}
+                      {new Intl.DateTimeFormat('es-CO', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(
+                        new Date(`${dia.fecha}T00:00:00Z`),
+                      )}
+                    </span>
+                  </h3>
+                  <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full font-semibold border border-slate-200">
+                    {dia.citas.length} {dia.citas.length === 1 ? 'cita' : 'citas'}
+                  </span>
+                </div>
+                {dia.citas.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-2">Sin citas este día.</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {dia.citas.map((cita) => (
+                      <TarjetaCita
+                        key={cita.id}
+                        {...cita}
+                        alConfirmar={cita.estado === 'pendiente' ? manejarConfirmacion : undefined}
+                        alCancelar={cita.estado === 'pendiente' ? manejarCancelacion : undefined}
+                        alVerHistoriaClinica={abrirHistoriaClinica}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-              {citasPendientes.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">Sin citas pendientes</p>
-              ) : (
-                citasPendientes.map(cita => (
-                  <TarjetaCita 
-                    key={cita.id} 
-                    {...cita} 
-                    alConfirmar={manejarConfirmacion} 
-                    alCancelar={manejarCancelacion}
-                    alVerHistoriaClinica={abrirHistoriaClinica}
-                  />
-                ))
-              )}
-            </div>
-
-            <div className="bg-slate-100/80 p-4 rounded-xl border-t-4 border-emerald-500 space-y-3">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-semibold text-slate-700 text-sm">Confirmadas</h3>
-                <span className="bg-white text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold border">{citasConfirmadas.length}</span>
-              </div>
-              {citasConfirmadas.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">Sin citas confirmadas</p>
-              ) : (
-                citasConfirmadas.map(cita => (
-                  <TarjetaCita 
-                    key={cita.id} 
-                    {...cita} 
-                    alVerHistoriaClinica={abrirHistoriaClinica}
-                  />
-                ))
-              )}
-            </div>
-
-            <div className="bg-slate-100/80 p-4 rounded-xl border-t-4 border-blue-500 space-y-3">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-semibold text-slate-700 text-sm">Completadas</h3>
-                <span className="bg-white text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold border">{citasCompletadas.length}</span>
-              </div>
-              {citasCompletadas.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">Sin citas completadas</p>
-              ) : (
-                citasCompletadas.map(cita => (
-                  <TarjetaCita 
-                    key={cita.id} 
-                    {...cita} 
-                    alVerHistoriaClinica={abrirHistoriaClinica}
-                  />
-                ))
-              )}
-            </div>
-
-            <div className="bg-slate-100/80 p-4 rounded-xl border-t-4 border-rose-500 space-y-3">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-semibold text-slate-700 text-sm">Canceladas</h3>
-                <span className="bg-white text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold border">{citasCanceladas.length}</span>
-              </div>
-              {citasCanceladas.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">Sin citas canceladas</p>
-              ) : (
-                citasCanceladas.map(cita => (
-                  <TarjetaCita 
-                    key={cita.id} 
-                    {...cita} 
-                    alVerHistoriaClinica={abrirHistoriaClinica}
-                  />
-                ))
-              )}
-            </div>
+            ))}
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm mt-6">
-            {citasFiltradas.length === 0 ? (
+            {citasVisibles.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-sm">No hay registros de citas disponibles.</div>
             ) : (
               <table className="w-full text-left border-collapse">
@@ -327,10 +414,19 @@ export const Agenda: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {citasFiltradas.map(cita => (
+                  {citasVisibles.map(cita => (
                     <tr key={cita.id} className="hover:bg-slate-50">
                       <td className="p-4 font-medium text-slate-800">{cita.nombrePaciente}</td>
-                      <td className="p-4 text-slate-600 font-mono text-xs">{cita.hora}</td>
+                      <td className="p-4 text-slate-600 font-mono text-xs">
+                        {new Intl.DateTimeFormat('es-CO', {
+                          timeZone: 'America/Bogota',
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        }).format(new Date(cita.iniciaEnIso))}
+                      </td>
                       <td className="p-4 text-slate-600">{cita.servicio}</td>
                       <td className="p-4">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${
@@ -358,148 +454,16 @@ export const Agenda: React.FC = () => {
         )}
       </div>
 
-      {historiaSeleccionada && (
-        <div 
-          className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-xs"
-          onClick={() => setHistoriaSeleccionada(null)}
-        >
-          <div 
-            className="h-full w-full max-w-lg bg-white p-6 shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div>
-              <div className="flex items-start justify-between border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-brand-800 text-white font-bold text-xs shadow-xs">
-                    {historiaSeleccionada.cita.nombrePaciente.split(" ").map((n) => n[0]).slice(0, 2).join("")}
-                  </div>
-                  <div>
-                    <h2 className="text-base font-bold text-slate-900">
-                      {historiaSeleccionada.cita.nombrePaciente}
-                    </h2>
-                    <p className="text-xs text-slate-500 font-mono">
-                      CC/Doc: {historiaSeleccionada.paciente?.documento ?? "No registrado"}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setHistoriaSeleccionada(null)}
-                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition cursor-pointer"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/80 text-xs space-y-2">
-                  <div className="flex justify-between items-center border-b border-slate-200/60 pb-2">
-                    <span className="font-semibold text-slate-800 flex items-center gap-1.5">
-                      <Stethoscope size={14} className="text-brand-800" />
-                      Consulta de Fisioterapia
-                    </span>
-                    <span className="capitalize px-2 py-0.5 rounded-md font-medium text-[11px] bg-white border border-slate-200 text-slate-700">
-                      {historiaSeleccionada.cita.estado}
-                    </span>
-                  </div>
-                  <p className="flex items-center gap-2 text-slate-700 pt-1">
-                    <Activity size={14} className="text-brand-800 shrink-0" />
-                    <span className="font-medium">Tratamiento:</span> {historiaSeleccionada.cita.servicio}
-                  </p>
-                  <p className="flex items-center gap-2 text-slate-600">
-                    <Calendar size={14} className="text-slate-400 shrink-0" />
-                    <span>Fecha y hora: {historiaSeleccionada.cita.hora}</span>
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-slate-200/80 p-3.5 space-y-2 text-xs">
-                  <h4 className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <User size={14} className="text-slate-500" /> Datos de Identificación
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2 text-slate-600 pt-1">
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">Teléfono:</span>
-                      <span className="font-medium text-slate-800">{historiaSeleccionada.paciente?.telefono ?? "—"}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">EPS:</span>
-                      <span className="font-medium text-slate-800">{historiaSeleccionada.paciente?.eps ?? "Particular"}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">Ciudad:</span>
-                      <span className="font-medium text-slate-800">{historiaSeleccionada.paciente?.ciudad ?? "—"}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block text-[11px]">Ocupación:</span>
-                      <span className="font-medium text-slate-800">{historiaSeleccionada.paciente?.ocupacion ?? "—"}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl bg-amber-50/60 border border-amber-200/80 p-3.5 text-xs space-y-2">
-                  <h4 className="font-semibold text-amber-900 flex items-center gap-1.5">
-                    <AlertCircle size={14} className="text-amber-700" /> Antecedentes & Alertas
-                  </h4>
-                  <div className="text-amber-900/90 space-y-1 font-normal">
-                    <p><span className="font-medium">Contacto de Emergencia:</span> {historiaSeleccionada.paciente?.contactoEmergencia ?? "No especificado"}</p>
-                    <p><span className="font-medium">Alergias / Contraindicaciones:</span> Ninguna reportada</p>
-                    <p><span className="font-medium">Última Atención Registrada:</span> {historiaSeleccionada.paciente?.ultimaSesion ?? "Sesión inicial"}</p>
-                  </div>
-                </div>
-
-                {historiaSeleccionada.cita.estado === 'confirmada' ? (
-                  <div className="space-y-2 pt-2">
-                    <label className="block text-xs font-semibold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Activity size={14} className="text-brand-800" />
-                      Evolución Clínica / Notas de Atención
-                    </label>
-                    <textarea
-                      value={comentarioTemp}
-                      onChange={(e) => setComentarioTemp(e.target.value)}
-                      placeholder="Escribe la valoración del día, nivel de dolor (EVA), técnicas aplicadas o recomendaciones..."
-                      rows={4}
-                      className="w-full rounded-xl border border-slate-200 bg-white p-3 text-xs font-normal text-slate-800 placeholder:text-slate-400 focus:border-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-800/10 transition"
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        onClick={() => guardarNotasYCompletar(false)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
-                      >
-                        <Save size={13} /> Guardar borrador
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  historiaSeleccionada.cita.notas && (
-                    <div className="space-y-1.5 pt-2">
-                      <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-                        <FileText size={13} className="text-slate-400" /> Observaciones de la Sesión
-                      </label>
-                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs text-slate-700 font-normal italic">
-                        "{historiaSeleccionada.cita.notas}"
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-slate-100">
-              {historiaSeleccionada.cita.estado === 'confirmada' ? (
-                <button
-                  onClick={() => guardarNotasYCompletar(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-brand-800 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
-                >
-                  <CheckCircle size={15} />
-                  Guardar y Marcar Cita como Completada
-                </button>
-              ) : (
-                <div className="p-2.5 bg-slate-100/80 text-slate-600 rounded-xl text-center text-xs font-normal border border-slate-200/60">
-                  Modo lectura — Cita en estado <span className="font-semibold capitalize">{historiaSeleccionada.cita.estado}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {pacienteModal && (
+        <HistoriaClinicaModal
+          paciente={pacienteModal}
+          reservaContextoId={reservaContextoModal}
+          onClose={() => {
+            setPacienteModal(null);
+            setReservaContextoModal(null);
+          }}
+          onPacienteActualizado={setPacienteModal}
+        />
       )}
     </AdminShell>
   );

@@ -14,7 +14,6 @@ import AdminReservasPage from "@/pages/admin/Reservas";
 import AdminClientesPage from "@/pages/admin/Clientes";
 import AdminServiciosPage from "@/pages/admin/Servicios";
 import AdminAutomatizacionesPage from "@/pages/admin/Automatizaciones";
-import AdminIntegracionesPage from "@/pages/admin/Integraciones";
 import AdminHistorialPage from "@/pages/admin/Historial";
 import AdminIndicadoresPage from "@/pages/admin/Indicadores";
 
@@ -40,10 +39,6 @@ export default function App() {
           <Route
             path="/admin/automatizaciones"
             element={<AdminAutomatizacionesPage />}
-          />
-          <Route
-            path="/admin/integraciones"
-            element={<AdminIntegracionesPage />}
           />
           <Route path="/admin/historial" element={<AdminHistorialPage />} />
           <Route path="/admin/indicadores" element={<AdminIndicadoresPage />} />

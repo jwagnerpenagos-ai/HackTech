@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { CheckCircle2, Loader2, XCircle, Mail } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle, Mail, Copy, Check, Gift } from "lucide-react";
 import { Navbar } from "@/components/site/navbar";
 import { Footer } from "@/components/site/footer";
 import { Container } from "@/components/ui/container";
@@ -60,6 +61,9 @@ export default function ResultadoPagoPage() {
                 <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-sky-100 px-4 py-1.5 text-xs font-semibold text-deep-600">
                   <Mail size={14} /> Revisa tu bandeja de entrada
                 </p>
+
+                {data?.codigoReferido && <CodigoReferido codigo={data.codigoReferido} />}
+
                 <div className="mt-8">
                   <Button href="/" variant="secondary">
                     Volver al inicio
@@ -121,5 +125,44 @@ export default function ResultadoPagoPage() {
       </main>
       <Footer />
     </>
+  );
+}
+
+function CodigoReferido({ codigo }: { codigo: string }) {
+  const [copiado, setCopiado] = useState(false);
+
+  async function copiar() {
+    try {
+      await navigator.clipboard.writeText(codigo);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      // Sin permiso de portapapeles: el código ya está visible para copiar a mano.
+    }
+  }
+
+  return (
+    <div className="mt-6 rounded-2xl border border-brand-200 bg-brand-50/50 p-5 text-left">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-brand-800">
+        <Gift size={14} /> Tu código de referido
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-ink-600">
+        Compártelo con alguien más: cuando reserve su primera cita y ponga tu código, sumas hacia tu
+        10% de descuento.
+      </p>
+      <div className="mt-3 flex items-center gap-2">
+        <span className="flex-1 rounded-xl border border-brand-200 bg-white px-4 py-2.5 text-center font-mono text-lg font-extrabold tracking-widest text-brand-800">
+          {codigo}
+        </span>
+        <button
+          type="button"
+          onClick={copiar}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-brand-200 bg-white text-brand-700 transition hover:bg-brand-50"
+          title="Copiar código"
+        >
+          {copiado ? <Check size={18} className="text-emerald-600" /> : <Copy size={18} />}
+        </button>
+      </div>
+    </div>
   );
 }

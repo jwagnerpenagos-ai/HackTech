@@ -166,6 +166,11 @@ function coreApiDePrueba() {
           chatId: "500",
         },
       }),
+    recordatoriosReclamar: () => Promise.resolve({ ok: true, datos: { recordatorios: [] } }),
+    recordatorioMarcarEnviado: () => Promise.resolve({ ok: true, datos: { ok: true } }),
+    recordatorioEnviarEmail: () => Promise.resolve({ ok: true, datos: { enviado: true } }),
+    citasHoy: () => Promise.resolve({ ok: true, datos: { citas: [] } }),
+    historiaResumen: () => Promise.resolve({ ok: true, datos: { tipo: "no_encontrado" } }),
   };
   return { coreApi, registrados };
 }

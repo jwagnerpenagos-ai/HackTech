@@ -297,7 +297,13 @@ describe("ejecutarComando", () => {
       { creadoPor: "555" },
     );
     expect(r.error).toMatchObject({ codigo: "registro_requerido", status: 422 });
-    expect((r.datos as { camposFaltantes: string[] }).camposFaltantes).toEqual(["cliente", "telefono", "email"]);
+    expect((r.datos as { camposFaltantes: string[] }).camposFaltantes).toEqual([
+      "cliente",
+      "telefono",
+      "email",
+      "documento",
+      "eps",
+    ]);
   });
 
   it("crear_sesion de un chat NUEVO con la valoración + nombre/teléfono/correo se registra y reserva", async () => {
@@ -305,6 +311,7 @@ describe("ejecutarComando", () => {
       [{ id: 7, nombre: "Valoración inicial", duracion_min_minutos: 60, duracion_max_minutos: 60 }],
       TARIFA,
       [], // resolverPorChatId: desconocido
+      [], // crearPacienteConVinculo: SELECT por numero_documento -> no existe
       [{ id: 9 }], // insert personas.paciente
       [], // insert personas.vinculo_telegram
       [{ id: 1, nombre: "Tunja" }],
@@ -319,6 +326,8 @@ describe("ejecutarComando", () => {
         cliente: "Ana Ríos",
         telefono: "3009998877",
         email: "ana@correo.com",
+        documento: "1122334455",
+        eps: "Sura",
         servicio: "Valoración inicial",
         sede: "Tunja",
         ...FECHA_HABIL,
