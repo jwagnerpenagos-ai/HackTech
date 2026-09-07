@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
@@ -7,14 +7,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { CheckCircle2, MapPin, Clock, CreditCard, Info } from "lucide-react";
+import { MapPin, Clock } from "lucide-react";
 import { Container } from "@/components/ui/container";
 import { Button } from "@/components/ui/button";
 import { Stepper } from "@/components/site/stepper";
 import {
-  catalogo,
-  indicacionesPreviasPorCategoria,
-  contacto,
   tiposDocumento,
   generos,
   epsOpciones,
@@ -36,7 +33,7 @@ const MENSAJE_ERROR: Record<string, string> = {
   no_reservable: "Ese servicio no se reserva en línea. Escríbenos al 311 398 1422.",
 };
 
-const steps = ["Servicio", "Sede", "Fecha y hora", "Tus datos", "Confirmación"];
+const steps = ["Servicio", "Sede", "Fecha y hora", "Tus datos"];
 
 const stepMotion = {
   initial: { opacity: 0, x: 20 },
@@ -103,12 +100,9 @@ function edadDesde(fechaNacimiento: string): number | null {
   return edad >= 0 && edad < 120 ? edad : null;
 }
 
-function categoriaDeSlug(slug: string) {
-  return catalogo.find((c) => c.servicios.some((s) => s.slug === slug));
-}
-
 export function ReservaWizard() {
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const preselected = params.get("servicio");
 
   const [step, setStep] = useState(0);
@@ -116,9 +110,6 @@ export function ReservaWizard() {
   const [sedeCodigo, setSedeCodigo] = useState("");
   const [fecha, setFecha] = useState<Date | undefined>(undefined);
   const [hora, setHora] = useState<string>("");
-  const [enviado, setEnviado] = useState(false);
-  const [referencia, setReferencia] = useState("");
-  const [telegramPago, setTelegramPago] = useState("");
   const [errorEnvio, setErrorEnvio] = useState("");
   const [enviando, setEnviando] = useState(false);
 
@@ -138,7 +129,6 @@ export function ReservaWizard() {
 
   const servicio = servicios.find((s) => s.slug === servicioSlug);
   const sedeObj = sedes.find((s) => s.codigo === sedeCodigo);
-  const categoria = servicioSlug ? categoriaDeSlug(servicioSlug) : undefined;
   const minFecha = useMemo(() => fechaMinimaReserva(), []);
 
   const sedeAtiendeDia = (codigo: string, d: Date): boolean => {
@@ -195,10 +185,7 @@ export function ReservaWizard() {
         },
         idempotencyKey,
       );
-      setReferencia(r.referencia);
-      setTelegramPago(r.telegramPago);
-      setEnviado(true);
-      goNext();
+      navigate(`/reservar/pago?ref=${encodeURIComponent(r.reservaUuid)}`);
     } catch (e) {
       const codigo = e instanceof ApiError ? e.codigo : "error";
       setErrorEnvio(
@@ -222,21 +209,19 @@ export function ReservaWizard() {
           </h1>
         </div>
 
-        {step < 4 && (
-          <a
-            href="/"
-            className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 transition hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-          >
-            Cancelar
-          </a>
-        )}
+        <a
+          href="/"
+          className="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 transition hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+        >
+          Cancelar
+        </a>
       </div>
 
       <div className="mt-6">
         <Stepper steps={steps} current={step} />
       </div>
 
-      {step > 0 && step < 4 && (
+      {step > 0 && (
         <div className="mt-6 rounded-2xl border border-sky-100 bg-sky-50/70 p-4 backdrop-blur">
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-ink-600">
             <div className="flex flex-wrap items-center gap-2 sm:gap-4">
@@ -748,82 +733,6 @@ export function ReservaWizard() {
                 </Button>
               </div>
             </motion.form>
-          )}
-
-          {/* PASO 4 — CONFIRMACIÓN */}
-          {step === 4 && enviado && (
-            <motion.div key="step-4" {...stepMotion} className="py-4 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                <CheckCircle2 size={38} />
-              </div>
-
-              <h2 className="mt-4 font-display text-2xl font-bold text-ink-900 sm:text-3xl">
-                ¡Solicitud Registrada!
-              </h2>
-
-              <p className="mx-auto mt-2 max-w-md text-sm text-ink-600 leading-relaxed">
-                Recibimos tu solicitud para <strong className="text-ink-900">{servicio?.nombre}</strong> en{" "}
-                <strong className="text-ink-900">{sedeObj?.nombre}</strong>.
-              </p>
-
-              <div className="mt-4 inline-block rounded-full bg-sky-100 px-4 py-1 text-xs font-bold text-deep-600">
-                Código de reserva: {referencia}
-              </div>
-
-              <div className="mt-8 space-y-3 text-left">
-                {categoria && (
-                  <div className="flex items-start gap-3 rounded-2xl border border-sky-100 bg-white p-4 shadow-xs">
-                    <Info size={18} className="mt-0.5 shrink-0 text-deep-600" />
-                    <div>
-                      <p className="text-xs font-bold text-ink-900">Indicaciones para tu cita</p>
-                      <p className="mt-0.5 text-xs text-ink-600">
-                        {indicacionesPreviasPorCategoria[categoria.id]}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 p-4 shadow-xs">
-                  <CreditCard size={18} className="mt-0.5 shrink-0 text-deep-600" />
-                  <div>
-                    <p className="text-xs font-bold text-ink-900">Pago por adelantado — 100%</p>
-                    <p className="mt-0.5 text-xs text-ink-600">
-                      Transfiere{" "}
-                      <strong className="text-ink-900">
-                        {servicio?.precio != null
-                          ? `$${servicio.precio.toLocaleString("es-CO")} ${servicio.moneda ?? "COP"}`
-                          : "el valor de la cita"}
-                      </strong>{" "}
-                      por Nequi a la Llave <strong className="text-ink-900">{contacto.nequi}</strong>. Tu cupo queda
-                      reservado mientras confirmamos el pago.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-deep-600/30 bg-deep-600/5 p-4 text-left shadow-xs">
-                  <p className="text-xs font-bold text-ink-900">Envía el comprobante por Telegram</p>
-                  <p className="mt-0.5 text-xs text-ink-600">
-                    Abre nuestro bot, envía la foto del comprobante y te confirmamos la cita ahí mismo.
-                  </p>
-                  {telegramPago && (
-                    <a
-                      href={telegramPago}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-3 inline-flex items-center gap-2 rounded-full bg-[#229ED9] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110"
-                    >
-                      Abrir Telegram y enviar el comprobante
-                    </a>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-8 flex justify-center gap-3">
-                <Button href="/" variant="secondary">
-                  Volver al inicio
-                </Button>
-              </div>
-            </motion.div>
           )}
         </AnimatePresence>
       </div>

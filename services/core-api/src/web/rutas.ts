@@ -6,6 +6,7 @@ import { ErrorDominio } from "../errores.js";
 import { firmarToken, verificarToken, secretoEfimero } from "./token.js";
 import * as publico from "./publico.js";
 import * as admin from "./admin.js";
+import * as checkout from "./checkout.js";
 
 /**
  * API que consume el navegador (`apps/web`). Vive bajo `/api/*`, fuera del
@@ -87,7 +88,7 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
       return reply.code(400).send({ error: "idempotency_key_requerida" });
     }
     try {
-      const res = await publico.crearReservaWeb(db, cfg.TELEGRAM_BOT_USERNAME, {
+      const res = await publico.crearReservaWeb(db, {
         slug: body.data.servicio,
         sedeCodigo: body.data.sede,
         fecha: body.data.fecha,
@@ -103,6 +104,27 @@ export function registrarRutasWeb(app: FastifyInstance, db: Db, cfg: Config): vo
       }
       throw err;
     }
+  });
+
+  // --- Checkout de pago del sitio (ver web/checkout.ts) ------------------
+  const RefQuery = z.object({ ref: z.string().uuid() });
+
+  app.get("/api/pagos/checkout", async (req, reply) => {
+    const q = RefQuery.safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: "ref_invalido" });
+    return conDominio(reply, () => checkout.datosCheckout(db, q.data.ref));
+  });
+
+  app.post("/api/pagos/simular", async (req, reply) => {
+    const b = z.object({ ref: z.string().uuid() }).safeParse(req.body);
+    if (!b.success) return reply.code(400).send({ error: "cuerpo_invalido" });
+    return conDominio(reply, () => checkout.simularPago(db, b.data.ref));
+  });
+
+  app.get("/api/pagos/estado", async (req, reply) => {
+    const q = RefQuery.safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: "ref_invalido" });
+    return conDominio(reply, () => checkout.estadoPagoWeb(db, q.data.ref));
   });
 
   // --- Admin (sesión de Lina) -------------------------------------------

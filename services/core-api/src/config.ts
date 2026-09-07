@@ -37,10 +37,6 @@ const EnvSchema = z.object({
   WEB_SESSION_SECRET: z.string().min(16).optional(),
   WEB_TOKEN_TTL_MIN: z.coerce.number().int().min(5).max(1440).default(480),
 
-  // Usuario del bot de Telegram (sin @). El sitio manda al paciente a
-  // t.me/<usuario>?start=pago_<uuid> para enviar el comprobante de pago.
-  TELEGRAM_BOT_USERNAME: z.string().default("FisioLiiBot"),
-
   // Límites defensivos de la superficie HTTP.
   CORE_API_MAX_BODY_BYTES: z.coerce.number().int().min(256).max(1_048_576).default(16_384),
   CORE_API_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(120),

@@ -5,6 +5,8 @@ import Home from "@/pages/Home";
 import ServiciosPage from "@/pages/Servicios";
 import NosotrosPage from "@/pages/Nosotros";
 import ReservarPage from "@/pages/Reservar";
+import PagoSimuladoPage from "@/pages/PagoSimulado";
+import ResultadoPagoPage from "@/pages/ResultadoPago";
 import ResenasPage from "@/pages/Resenas";
 import AdminLoginPage from "@/pages/admin/Login";
 import AdminAgendaPage from "@/pages/admin/Agenda";
@@ -26,6 +28,8 @@ export default function App() {
           <Route path="/servicios" element={<ServiciosPage />} />
           <Route path="/nosotros" element={<NosotrosPage />} />
           <Route path="/reservar" element={<ReservarPage />} />
+          <Route path="/reservar/pago" element={<PagoSimuladoPage />} />
+          <Route path="/reservar/resultado" element={<ResultadoPagoPage />} />
           <Route path="/resenas" element={<ResenasPage />} />
 
           <Route path="/admin/login" element={<AdminLoginPage />} />

@@ -297,10 +297,10 @@ describe("ejecutarComando", () => {
       { creadoPor: "555" },
     );
     expect(r.error).toMatchObject({ codigo: "registro_requerido", status: 422 });
-    expect((r.datos as { camposFaltantes: string[] }).camposFaltantes).toEqual(["cliente", "telefono"]);
+    expect((r.datos as { camposFaltantes: string[] }).camposFaltantes).toEqual(["cliente", "telefono", "email"]);
   });
 
-  it("crear_sesion de un chat NUEVO con la valoración + nombre/teléfono se registra y reserva", async () => {
+  it("crear_sesion de un chat NUEVO con la valoración + nombre/teléfono/correo se registra y reserva", async () => {
     const { db } = crearDbFalsa([
       [{ id: 7, nombre: "Valoración inicial", duracion_min_minutos: 60, duracion_max_minutos: 60 }],
       TARIFA,
@@ -310,6 +310,7 @@ describe("ejecutarComando", () => {
       [{ id: 1, nombre: "Tunja" }],
       [{ crear_reserva: 78 }],
       ...COLA_CREAR,
+      [{ id: 900 }], // enviarCorreo: INSERT integracion.outbox (acuse por correo)
     ]);
     const r = await ejecutarComando(
       db,
@@ -317,6 +318,7 @@ describe("ejecutarComando", () => {
       {
         cliente: "Ana Ríos",
         telefono: "3009998877",
+        email: "ana@correo.com",
         servicio: "Valoración inicial",
         sede: "Tunja",
         ...FECHA_HABIL,

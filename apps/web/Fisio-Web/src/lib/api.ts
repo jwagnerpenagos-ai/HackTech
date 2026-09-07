@@ -99,14 +99,30 @@ export interface PacienteReservaApi {
 
 export interface ReservaCreadaApi {
   reservaId: number;
+  /** id público de la reserva; viaja como `ref` en el checkout. */
   reservaUuid: string;
   referencia: string;
   estado: string;
   monto: number | null;
   moneda: string | null;
   nequi: string;
-  /** Enlace al bot de Telegram para enviar el comprobante de pago. */
-  telegramPago: string;
+}
+
+export interface CheckoutApi {
+  reservaId: number;
+  estado: string;
+  servicio: string | null;
+  sede: string | null;
+  paciente: string;
+  iniciaEn: string;
+  monto: number | null;
+  moneda: string | null;
+  nequi: string;
+}
+
+export interface EstadoPagoApi {
+  estado: "sin_pago" | "en_proceso" | "aprobado" | "rechazado";
+  reservaId: number;
 }
 
 export interface CitaAdminApi {
@@ -139,6 +155,14 @@ export const api = {
     input: { servicio: string; sede: string; fecha: string; hora: string; paciente: PacienteReservaApi },
     idempotencyKey: string,
   ) => pedir<ReservaCreadaApi>("/api/reservas", { method: "POST", body: input, idempotencyKey }),
+
+  // Checkout de pago simulado del sitio. `ref` es el reservaUuid.
+  checkout: (ref: string) => pedir<CheckoutApi>(`/api/pagos/checkout?ref=${encodeURIComponent(ref)}`),
+
+  simularPago: (ref: string) =>
+    pedir<{ pagoId: number; estado: string }>("/api/pagos/simular", { method: "POST", body: { ref } }),
+
+  estadoPago: (ref: string) => pedir<EstadoPagoApi>(`/api/pagos/estado?ref=${encodeURIComponent(ref)}`),
 
   // Admin
   login: (usuario: string, clave: string) =>

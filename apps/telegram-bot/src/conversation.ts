@@ -274,12 +274,20 @@ export async function procesarTexto(
   return manejarIntencionNueva(cfg, r.intencion, autorizado);
 }
 
+const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
 /** Llena el primer faltante con `valor` y avanza el flujo. */
 function llenarFaltante(estado: EstadoConversacion, valor: string): Procesado {
   const [slot, ...resto] = estado.faltantes;
+  if (slot === "email" && !RE_EMAIL.test(valor.trim())) {
+    return {
+      estado,
+      accion: { tipo: "pedir_dato", texto: "Ese correo no parece válido. Escríbalo así: nombre@correo.com" },
+    };
+  }
   return siguientePaso({
     ...estado,
-    entidades: { ...estado.entidades, ...(slot !== undefined ? { [slot]: valor } : {}) },
+    entidades: { ...estado.entidades, ...(slot !== undefined ? { [slot]: valor.trim() } : {}) },
     faltantes: resto,
   });
 }

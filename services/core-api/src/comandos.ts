@@ -316,7 +316,7 @@ export async function ejecutarComando(
                 422,
               );
             }
-            const faltanRegistro = (["cliente", "telefono"] as const).filter(
+            const faltanRegistro = (["cliente", "telefono", "email"] as const).filter(
               (campo) => entidades[campo] === undefined || entidades[campo] === null,
             );
             if (faltanRegistro.length > 0) {
@@ -325,7 +325,8 @@ export async function ejecutarComando(
                 datos: { camposFaltantes: faltanRegistro },
                 error: {
                   codigo: "registro_requerido",
-                  mensaje: "Es su primera cita: necesito su nombre completo y su teléfono para registrarlo.",
+                  mensaje:
+                    "Es su primera cita: necesito su nombre completo, su teléfono y su correo (le enviamos ahí la confirmación).",
                   status: 422,
                 },
               };
@@ -333,7 +334,7 @@ export async function ejecutarComando(
             paciente = await pacientes.crearPacienteConVinculo(db, {
               nombreCompleto: exigir(entidades.cliente, "cliente"),
               telefono: exigir(entidades.telefono, "telefono"),
-              email: entidades.email ?? null,
+              email: exigir(entidades.email, "email"),
               chatId,
             });
           }
@@ -369,14 +370,16 @@ export async function ejecutarComando(
           tarifa,
         });
 
-        // Confirmación por correo: obligatoria cuando el paciente tiene
-        // email en ficha. No es una regla de negocio nueva, es orquestación
-        // de algo que ya existe (integraciones.enviarCorreo → outbox).
+        // Acuse por correo (la confirmación real va cuando se verifica el
+        // pago — ver dominio/pagos.ts). Solo si el paciente dejó email.
         if (paciente.email) {
           await integraciones.enviarCorreo(db, {
             destinatario: paciente.email,
-            asunto: "Confirmación de su cita — La Fisioterapeuta Li",
-            texto: `Hola ${paciente.nombreCompleto}, su cita de ${servicio.nombre} en ${sede.nombre} quedó agendada para el ${fecha} a las ${hora}.`,
+            asunto: "Recibimos su reserva — La Fisioterapeuta Li",
+            texto:
+              `Hola ${paciente.nombreCompleto}, recibimos su reserva de ${servicio.nombre} en ${sede.nombre} ` +
+              `para el ${fecha} a las ${hora}. Está pendiente del pago anticipado; le confirmamos la cita ` +
+              `apenas lo verifiquemos.`,
           });
         }
 

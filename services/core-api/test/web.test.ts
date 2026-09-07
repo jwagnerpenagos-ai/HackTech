@@ -3,7 +3,7 @@ import { crearDbFalsa } from "./fakeDb.js";
 import { codigoDeSlug, slugDeCodigo } from "../src/web/slugs.js";
 import { firmarToken, verificarToken } from "../src/web/token.js";
 import { listarServiciosWeb, disponibilidadWeb, crearReservaWeb } from "../src/web/publico.js";
-import { iniciarPagoWeb } from "../src/dominio/pagos.js";
+import { datosCheckout, simularPago, estadoPagoWeb } from "../src/web/checkout.js";
 
 describe("web/slugs", () => {
   it("traduce slug <-> codigo en ambos sentidos", () => {
@@ -60,48 +60,86 @@ describe("web/publico", () => {
     expect(r[0]).toMatch(/^\d{2}:\d{2}$/);
   });
 
-  it("crearReservaWeb: reserva repetida con misma Idempotency-Key devuelve la misma + enlace a Telegram", async () => {
+  it("crearReservaWeb: reserva repetida con misma Idempotency-Key devuelve la misma (con uuid)", async () => {
     const { db } = crearDbFalsa([
       [{ id: 77, uuid: "11111111-1111-1111-1111-111111111111", estado: "pendiente_pago" }], // idempotencia: ya existe
       [{ valor_total: "100000.00", moneda: "COP" }], // compra ligada
     ]);
-    const r = await crearReservaWeb(db, "FisioLiiBot", {
+    const r = await crearReservaWeb(db, {
       slug: "valoracion-inicial", sedeCodigo: "TUNJA", fecha: "2026-12-01", hora: "09:00",
       paciente: { nombre: "Ana Torres" }, idempotencyKey: "clave-repetida-123",
     });
-    expect(r).toMatchObject({ reservaId: 77, estado: "pendiente_pago", monto: 100000 });
-    expect(r.telegramPago).toBe(
-      "https://t.me/FisioLiiBot?start=pago_11111111-1111-1111-1111-111111111111",
-    );
+    expect(r).toMatchObject({
+      reservaId: 77,
+      reservaUuid: "11111111-1111-1111-1111-111111111111",
+      estado: "pendiente_pago",
+      monto: 100000,
+    });
   });
 });
 
-describe("iniciarPagoWeb", () => {
-  it("busca la reserva por uuid, vincula el chat y devuelve los datos del pago", async () => {
-    const { db, llamadas } = crearDbFalsa([
-      [
-        {
-          id: 42,
-          estado: "pendiente_pago",
-          compra_id: 9,
-          paciente_id: 5,
-          valor_total: "100000.00",
-          moneda: "COP",
-          servicio: "Valoración inicial",
-          inicia_en: "2026-12-01T14:00:00.000Z",
-        },
-      ],
-      [], // INSERT vinculo_telegram ON CONFLICT DO NOTHING
-    ]);
-    const r = await iniciarPagoWeb(db, { reservaUuid: "11111111-1111-1111-1111-111111111111", chatId: 999 });
-    expect(r).toMatchObject({ encontrada: true, reservaId: 42, compraId: 9, monto: 100000, estado: "pendiente_pago" });
-    expect(llamadas.some((l) => l.texto.includes("personas.vinculo_telegram"))).toBe(true);
+const RESERVA_PAGO = {
+  id: 42,
+  estado: "pendiente_pago",
+  compra_id: 9,
+  valor_total: "100000.00",
+  moneda: "COP",
+  servicio: "Valoración inicial",
+  sede: "Sede Tunja",
+  paciente: "Ana Torres",
+  inicia_en: "2026-12-01T14:00:00.000Z",
+};
+
+describe("web/checkout", () => {
+  it("datosCheckout devuelve lo que muestra el checkout", async () => {
+    const { db } = crearDbFalsa([[RESERVA_PAGO]]);
+    const r = await datosCheckout(db, "11111111-1111-1111-1111-111111111111");
+    expect(r).toMatchObject({ reservaId: 42, servicio: "Valoración inicial", monto: 100000, nequi: "3113981422" });
   });
 
-  it("uuid inexistente -> 404", async () => {
+  it("simularPago abre un comercial.pago registrado si no hay uno", async () => {
+    const { db, llamadas } = crearDbFalsa([
+      [RESERVA_PAGO], // buscarReserva
+      [], // SELECT pago existente (ninguno)
+      [{ id: 7 }], // INSERT comercial.pago
+    ]);
+    const r = await simularPago(db, "11111111-1111-1111-1111-111111111111");
+    expect(r).toEqual({ pagoId: 7, estado: "registrado" });
+    expect(llamadas.some((l) => l.texto.includes("INSERT INTO comercial.pago"))).toBe(true);
+  });
+
+  it("simularPago no duplica: si ya hay un pago registrado lo devuelve", async () => {
+    const { db } = crearDbFalsa([
+      [RESERVA_PAGO],
+      [{ id: 5, estado: "registrado" }], // ya existe
+    ]);
+    const r = await simularPago(db, "11111111-1111-1111-1111-111111111111");
+    expect(r).toEqual({ pagoId: 5, estado: "registrado" });
+  });
+
+  it("estadoPagoWeb mapea el estado del pago", async () => {
+    const { db } = crearDbFalsa([
+      [RESERVA_PAGO],
+      [{ estado: "registrado" }],
+    ]);
+    expect(await estadoPagoWeb(db, "11111111-1111-1111-1111-111111111111")).toEqual({
+      estado: "en_proceso",
+      reservaId: 42,
+    });
+  });
+
+  it("estadoPagoWeb: cita confirmada -> aprobado", async () => {
+    const { db } = crearDbFalsa([[{ ...RESERVA_PAGO, estado: "confirmada" }]]);
+    expect(await estadoPagoWeb(db, "11111111-1111-1111-1111-111111111111")).toEqual({
+      estado: "aprobado",
+      reservaId: 42,
+    });
+  });
+
+  it("ref inexistente -> 404", async () => {
     const { db } = crearDbFalsa([[]]);
-    await expect(
-      iniciarPagoWeb(db, { reservaUuid: "22222222-2222-2222-2222-222222222222", chatId: 1 }),
-    ).rejects.toMatchObject({ codigo: "no_encontrado" });
+    await expect(datosCheckout(db, "22222222-2222-2222-2222-222222222222")).rejects.toMatchObject({
+      codigo: "no_encontrado",
+    });
   });
 });

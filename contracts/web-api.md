@@ -72,26 +72,53 @@ Respuesta `201`:
 ```json
 { "reservaId": 42, "reservaUuid": "…-uuid", "referencia": "FISIO-…",
   "estado": "pendiente_pago", "monto": 100000, "moneda": "COP",
-  "nequi": "3113981422",
-  "telegramPago": "https://t.me/FisioLiiBot?start=pago_<reservaUuid>" }
+  "nequi": "3113981422" }
 ```
-La cita nace `pendiente_pago`. **No hay pasarela de pago**: el paciente
-transfiere por Nequi y envía el comprobante por Telegram — el sitio muestra
-un botón a `telegramPago`. Ese enlace abre el bot con el payload
-`pago_<reservaUuid>`; el bot lo reconoce (`/start`), pide la foto del
-comprobante y sigue el flujo de pagos que ya existe (`/pagos` del staff →
-`comercial.verificar_pago` → cita `confirmada`). Alternativa: Lina confirma
-la cita a mano desde el panel.
-
-### `POST /pagos/web/iniciar` — interno (lo llama el bot, guard `X-Internal-Key`)
-Body `{ "reserva_uuid": "<uuid>", "chat_id": <n> }`. Busca la reserva por su
-uuid público, vincula ese chat de Telegram al paciente si aún no lo está, y
-devuelve `{ encontrada, estado, reservaId, compraId, monto, moneda, servicio, iniciaEn }`.
-`404` si el uuid no existe.
+La cita nace `pendiente_pago`. El `reservaUuid` es el identificador público
+de la reserva: el sitio lo usa como `ref` en el checkout simulado (abajo).
 
 Errores: `409 cupo_ocupado` (ese horario ya se tomó), `422 anticipacion_insuficiente`
 (menos de 24 h), `422 valoracion_requerida` (paciente conocido sin valoración
 atendida que pide otro servicio), `400 cuerpo_invalido`.
+
+---
+
+## Checkout de pago (simulado)
+
+**No hay pasarela de pago real.** El sitio muestra una pantalla de pago con
+la estética de una billetera (rotulada como demo) y, al pulsar "Pagar",
+registra un `comercial.pago` en estado `registrado` — igual que un
+comprobante reportado por el bot. Lina lo verifica desde su Telegram
+(`comercial.verificar_pago` → cita `confirmada`), y el bot le avisa cuando
+entra un pago web nuevo (vigilancia de `/pagos/pendientes`). Al confirmarse,
+core-api envía el correo de "cita confirmada" al email de la reserva.
+
+Todas van sin auth (público) y usan `ref` = `reservaUuid`.
+
+### `GET /api/pagos/checkout?ref=<uuid>`
+Datos para pintar el checkout.
+```json
+{ "reservaId": 42, "estado": "pendiente_pago",
+  "servicio": "Valoración inicial", "sede": "Sede Tunja",
+  "paciente": "Ana Torres", "iniciaEn": "…-05:00",
+  "monto": 100000, "moneda": "COP", "nequi": "3113981422" }
+```
+`404 no_encontrado` si el uuid no existe.
+
+### `POST /api/pagos/simular`
+Body `{ "ref": "<uuid>" }`. Abre el pago para que Lina lo verifique (si ya
+había uno `registrado`/`verificado` devuelve ese, no duplica).
+`200 { "pagoId": 7, "estado": "registrado" }`.
+`422 sin_pago` (la reserva no tiene compra ligada), `422 no_pendiente` (la
+cita ya no está `pendiente_pago`).
+
+### `GET /api/pagos/estado?ref=<uuid>`
+Estado del pago, para que la pantalla "en proceso" haga polling.
+```json
+{ "estado": "en_proceso", "reservaId": 42 }
+```
+`estado`: `sin_pago` | `en_proceso` (pago `registrado`, esperando a Lina) |
+`aprobado` (pago `verificado` o cita `confirmada`) | `rechazado`.
 
 ---
 

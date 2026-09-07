@@ -146,13 +146,12 @@ export interface PacienteWebInput {
 
 export interface ReservaWebResultado {
   reservaId: number;
+  /** id público de la reserva; el sitio lo usa como `ref` del checkout. */
   reservaUuid: string;
   referencia: string;
   estado: string;
   monto: number | null;
   moneda: string | null;
-  /** Enlace al bot para enviar el comprobante de pago de esta reserva. */
-  telegramPago: string;
 }
 
 /** Busca al paciente por documento; si no está, lo crea con los datos de la ficha del sitio. */
@@ -193,14 +192,8 @@ async function buscarOCrearPaciente(db: Db, p: PacienteWebInput): Promise<{ id: 
   return { id: Number((r.rows[0] as { id: number | string }).id) };
 }
 
-/** t.me/<bot>?start=pago_<uuid> — el bot reconoce ese payload y pide el comprobante. */
-function enlaceTelegramPago(botUsername: string, reservaUuid: string): string {
-  return `https://t.me/${botUsername}?start=pago_${reservaUuid}`;
-}
-
 export async function crearReservaWeb(
   db: Db,
-  botUsername: string,
   opts: { slug: string; sedeCodigo: string; fecha: string; hora: string; paciente: PacienteWebInput; idempotencyKey: string },
 ): Promise<ReservaWebResultado> {
   const creadoPor = `web:${opts.idempotencyKey}`;
@@ -227,7 +220,6 @@ export async function crearReservaWeb(
       estado: previa.rows[0].estado,
       monto: c ? Number(c.valor_total) : null,
       moneda: c?.moneda ?? null,
-      telegramPago: enlaceTelegramPago(botUsername, previa.rows[0].uuid),
     };
   }
 
@@ -282,7 +274,6 @@ export async function crearReservaWeb(
       estado: "pendiente_pago",
       monto: creada.montoTotal ?? tarifa.valorTotal,
       moneda: creada.moneda ?? tarifa.moneda,
-      telegramPago: enlaceTelegramPago(botUsername, reservaUuid),
     };
   } catch (err) {
     throw normalizarErrorDb(err);

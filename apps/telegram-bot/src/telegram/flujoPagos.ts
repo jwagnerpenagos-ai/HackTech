@@ -1,8 +1,33 @@
 import { type Bot, InlineKeyboard } from "grammy";
 import { esAutorizado } from "../auth.js";
+import type { PagoPendiente } from "../coreApiClient.js";
 import { fechaLarga, horaCorta } from "../resultados.js";
 import type { FlujoDeps, MiContexto } from "./contexto.js";
 import { editarOResponder, formatearMonto } from "./formato.js";
+
+/**
+ * Tarjeta de un comprobante por verificar: el texto y los botones
+ * `[✓ Verificar]` / `[✗ Rechazar]`. La usan tanto `/pagos` (a pedido) como la
+ * vigilancia que le avisa a Lina cuando entra un pago desde la web.
+ */
+export function tarjetaPago(p: PagoPendiente): {
+  caption: string;
+  teclado: InlineKeyboard;
+  comprobanteRef: string | null;
+} {
+  const caption = [
+    `Pago #${p.pagoId} · ${formatearMonto(p.valor)}`,
+    p.paciente,
+    `${p.servicio ?? "?"} · ${fechaLarga(p.iniciaEn.slice(0, 10))} · ${horaCorta(p.iniciaEn)}`,
+    p.referencia ? `Ref.: ${p.referencia}` : "",
+  ]
+    .filter((l) => l.length > 0)
+    .join("\n");
+  const teclado = new InlineKeyboard()
+    .text("✓ Verificar", `pago:ok:${p.pagoId}`)
+    .text("✗ Rechazar", `pago:no:${p.pagoId}`);
+  return { caption, teclado, comprobanteRef: p.comprobanteRef };
+}
 
 /**
  * Verificación de pagos por el personal del consultorio. `/pagos` lista los
@@ -29,21 +54,11 @@ export function registrarFlujoPagos(bot: Bot<MiContexto>, deps: FlujoDeps): void
       return;
     }
     for (const p of r.datos.pagos) {
-      const caption = [
-        `Pago #${p.pagoId} · ${formatearMonto(p.valor)}`,
-        p.paciente,
-        `${p.servicio ?? "?"} · ${fechaLarga(p.iniciaEn.slice(0, 10))} · ${horaCorta(p.iniciaEn)}`,
-        p.referencia ? `Ref.: ${p.referencia}` : "",
-      ]
-        .filter((l) => l.length > 0)
-        .join("\n");
-      const teclado = new InlineKeyboard()
-        .text("✓ Verificar", `pago:ok:${p.pagoId}`)
-        .text("✗ Rechazar", `pago:no:${p.pagoId}`);
-      if (p.comprobanteRef) {
-        await ctx.replyWithPhoto(p.comprobanteRef, { caption, reply_markup: teclado });
+      const { caption, teclado, comprobanteRef } = tarjetaPago(p);
+      if (comprobanteRef) {
+        await ctx.replyWithPhoto(comprobanteRef, { caption, reply_markup: teclado });
       } else {
-        await ctx.reply(`${caption}\n(sin imagen adjunta)`, { reply_markup: teclado });
+        await ctx.reply(`${caption}\n(pago desde la web — sin comprobante adjunto)`, { reply_markup: teclado });
       }
     }
   });
